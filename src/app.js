@@ -317,32 +317,44 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     function renderMindmap() {
       const subject = getActiveSubject();
       els.outlineTitle.textContent = subject.name + ' · 全书思维框架';
-      const levelName = ['章', '节', '小节', '点'];
+      const levelName = ['章', '节', '小节', '点', '项'];
 
-      function titleMetrics(title, depth, childCount) {
-        const chars = Array.from(String(title || ''));
-        const weight = chars.reduce((sum, ch) => sum + (/[^\x00-\xff]/.test(ch) ? 1.65 : 0.9), 0);
-        const baseFont = [17, 16, 15, 14][Math.min(depth, 3)];
-        const font = Math.max(11, Math.min(baseFont, baseFont - Math.max(0, weight - 14) * 0.32));
-        const extra = childCount ? 38 : 22;
-        const minByDepth = [260, 230, 210, 180][Math.min(depth, 3)];
-        const maxByDepth = [520, 480, 440, 380][Math.min(depth, 3)];
-        const width = Math.round(Math.min(maxByDepth, Math.max(minByDepth, weight * font * 0.72 + 82 + extra)));
+      function textWeight(title) {
+        return Array.from(String(title || '')).reduce((sum, ch) => sum + (/[^\x00-\xff]/.test(ch) ? 1.58 : 0.86), 0);
+      }
+
+      function titleMetrics(title, depth) {
+        const weight = textWeight(title);
+        const baseFont = [17, 16, 15, 14, 13][Math.min(depth, 4)];
+        const font = Math.max(12, Math.min(baseFont, baseFont - Math.max(0, weight - 16) * 0.22));
+        const minByDepth = [280, 250, 230, 210, 190][Math.min(depth, 4)];
+        const maxByDepth = [560, 520, 500, 460, 420][Math.min(depth, 4)];
+        const width = Math.round(Math.min(maxByDepth, Math.max(minByDepth, weight * font * 0.74 + 112)));
         return { font, width };
       }
 
-      const make = (node, depth = 0) => {
-        const div = document.createElement('div');
+      function measure(node, depth = 0) {
+        const own = titleMetrics(node.title, depth);
+        const childMeasures = (node.children || []).map(child => measure(child, depth + 1));
+        const maxChildWidth = childMeasures.reduce((max, item) => Math.max(max, item.totalWidth), 0);
+        const childrenInset = maxChildWidth ? 54 : 0;
+        const totalWidth = Math.max(own.width, maxChildWidth + childrenInset);
+        return { own, childMeasures, totalWidth };
+      }
+
+      const make = (node, depth = 0, measured = null) => {
+        const m = measured || measure(node, depth);
         const childCount = node.children?.length || 0;
-        const m = titleMetrics(node.title, depth, childCount);
-        div.className = 'mind-node depth-' + Math.min(depth, 3) + (childCount >= 3 ? ' has-many-children' : '');
-        div.style.setProperty('--node-w', m.width + 'px');
-        div.style.setProperty('--node-min-w', Math.max(160, m.width - 18) + 'px');
+        const div = document.createElement('div');
+        div.className = 'mind-node depth-' + Math.min(depth, 4) + (childCount >= 3 ? ' has-many-children' : '');
+        div.style.setProperty('--node-w', Math.ceil(m.totalWidth) + 'px');
+
         const title = document.createElement('div');
         title.className = 'mind-node-title';
         title.dataset.level = levelName[Math.min(depth, levelName.length - 1)];
         title.title = '点击跳转到：' + node.title;
-        title.style.fontSize = m.font + 'px';
+        title.style.fontSize = m.own.font + 'px';
+
         const text = document.createElement('span');
         text.className = 'mind-title-text';
         text.textContent = node.title;
@@ -354,20 +366,22 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
           selectNode(node.id);
         });
         div.appendChild(title);
+
         if (childCount) {
           const childBox = document.createElement('div');
           childBox.className = 'mind-children';
-          node.children.forEach(c => childBox.appendChild(make(c, depth + 1)));
+          node.children.forEach((child, index) => childBox.appendChild(make(child, depth + 1, m.childMeasures[index])));
           div.appendChild(childBox);
         }
         return div;
       };
+
       const viewport = document.createElement('div');
       viewport.className = 'mindmap-viewport';
       const level = document.createElement('div');
       level.className = 'mind-level';
-      level.style.setProperty('--mind-cols', Math.min(Math.max(subject.nodes.length, 1), 4));
-      subject.nodes.forEach(n => level.appendChild(make(n, 0)));
+      level.style.setProperty('--mind-cols', Math.min(Math.max(subject.nodes.length, 1), 3));
+      subject.nodes.forEach(n => level.appendChild(make(n, 0, measure(n, 0))));
       viewport.appendChild(level);
       els.mindmap.innerHTML = '';
       els.mindmap.appendChild(viewport);
@@ -381,12 +395,15 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
 
     function centerMindmap() {
       const viewport = els.mindmap.querySelector('.mindmap-viewport');
-      if (!viewport) return;
-      mindPan.scale = 1;
-      const viewW = viewport.offsetWidth;
-      const viewH = viewport.offsetHeight;
-      mindPan.x = Math.round((els.mindmap.clientWidth - viewW) / 2);
-      mindPan.y = Math.round(Math.max(12, (els.mindmap.clientHeight - viewH) / 2));
+      const content = els.mindmap.querySelector('.mind-level');
+      if (!viewport || !content) return;
+      const contentW = content.scrollWidth + 80;
+      const contentH = content.scrollHeight + 80;
+      const fitX = els.mindmap.clientWidth / Math.max(contentW, 1);
+      const fitY = els.mindmap.clientHeight / Math.max(contentH, 1);
+      mindPan.scale = Math.max(0.46, Math.min(1, Math.min(fitX, fitY) * 0.96));
+      mindPan.x = Math.round((els.mindmap.clientWidth - contentW * mindPan.scale) / 2 + 40 * mindPan.scale);
+      mindPan.y = Math.round(Math.max(14, (els.mindmap.clientHeight - contentH * mindPan.scale) / 2 + 32 * mindPan.scale));
       mindPan.moved = false;
       applyMindPan();
     }
@@ -624,7 +641,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       bindEvents();
       const saved = await idbGet(DATA_KEY).catch(() => null);
       state = saved || defaultData();
-      state.uiMode ||= 'preview'; state.htmlVisible = state.htmlVisible !== false;
+      state.uiMode = 'preview'; state.htmlVisible = state.htmlVisible !== false;
       normalizeImportedData();
       for (const subject of state.subjects) walk(subject.nodes, node => { if (state.expanded[node.id] === undefined) state.expanded[node.id] = true; });
       renderAll(); await idbSet(DATA_KEY, state);
