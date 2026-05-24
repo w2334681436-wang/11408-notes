@@ -18,8 +18,19 @@
     };
   </script>
   <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
-  <link rel="stylesheet" href="./styles/app.css" />
-
+  <script>
+    (function () {
+      const pad = (n) => String(n).padStart(2, '0');
+      const d = new Date();
+      const autoVersion = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+      window.__APP_VERSION__ = autoVersion;
+      document.documentElement.setAttribute('data-app-version', autoVersion);
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = `./styles/app.css?v=${autoVersion}`;
+      document.head.appendChild(css);
+    })();
+  </script>
 </head>
 <body>
   <div class="app read-mode" id="app">
@@ -29,7 +40,7 @@
         <div class="logo">研</div>
         <div>
           <div class="brand-title">11408 笔记框架系统</div>
-          <div class="brand-sub">默认预览优先 · 编辑双栏 · Markdown/HTML/公式 · IndexedDB</div>
+          <div class="brand-sub" id="appVersionText">默认预览优先 · 编辑双栏 · Markdown/HTML/公式 · IndexedDB</div>
         </div>
       </div>
       <div class="top-actions">
@@ -189,8 +200,18 @@
   </div>
 
   <div class="toast" id="toast"></div>
-
-  <script src="./src/app.js" defer></script>
-  <script src="./src/pwa.js" defer></script>
+  <script>
+    (function () {
+      const v = window.__APP_VERSION__ || Date.now();
+      function loadScript(src) {
+        const s = document.createElement('script');
+        s.src = `${src}?v=${v}`;
+        s.defer = true;
+        document.body.appendChild(s);
+      }
+      loadScript('./src/app.js');
+      loadScript('./src/pwa.js');
+    })();
+  </script>
 </body>
 </html>
