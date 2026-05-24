@@ -17,6 +17,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let mindPan = { x: 0, y: 0, scale: 1, dragging: false, startX: 0, startY: 0, baseX: 0, baseY: 0, moved: false };
     let saveTimer = null;
     let modalResolve = null;
+    let htmlCenterObjectUrl = null;
 
     const $ = s => document.querySelector(s);
     const els = {
@@ -181,26 +182,40 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       if (els.htmlCenterMask?.classList.contains('show')) {
         const info = findNodeById(state.activeNodeId);
         const htmlCode = info?.node?.html || html || '';
-        if (htmlCode.trim()) els.htmlCenterFrame.srcdoc = htmlDoc(htmlCode);
+        if (htmlCode.trim()) setHtmlCenterContent(htmlCode);
         else closeHtmlCenter();
       }
       typesetMath();
       updateHtmlGlobalButton();
     }
 
+    function setHtmlCenterContent(htmlCode) {
+      const body = (htmlCode || '').trim();
+      if (!body || !els.htmlCenterFrame) return;
+      if (htmlCenterObjectUrl) {
+        URL.revokeObjectURL(htmlCenterObjectUrl);
+        htmlCenterObjectUrl = null;
+      }
+      const blob = new Blob([htmlDoc(body)], { type: 'text/html;charset=utf-8' });
+      htmlCenterObjectUrl = URL.createObjectURL(blob);
+      // 用 Blob URL 替代 srcdoc，修复部分手机/PWA 中 iframe 反复打开后白屏的问题。
+      els.htmlCenterFrame.src = htmlCenterObjectUrl;
+    }
+
     function openHtmlCenter() {
       const info = findNodeById(state.activeNodeId);
       const htmlCode = info?.node?.html || '';
       if (!htmlCode.trim()) { showToast('当前小节还没有 HTML 代码'); return; }
-      els.htmlCenterFrame.srcdoc = htmlDoc(htmlCode);
       els.htmlCenterMask.classList.add('show');
       state.htmlVisible = true;
+      // iPad/Safari/PWA 下先显示弹窗再写入 iframe，更稳定。
+      requestAnimationFrame(() => setHtmlCenterContent(htmlCode));
       updateHtmlGlobalButton();
     }
 
     function closeHtmlCenter() {
       els.htmlCenterMask.classList.remove('show');
-      els.htmlCenterFrame.srcdoc = 'about:blank';
+      // 不再把 iframe 立刻改成 about:blank，避免下次打开时偶发白屏。
       updateHtmlGlobalButton();
     }
 
@@ -629,7 +644,10 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
 `); showToast('图片已插入：编辑区只显示短标签，原图已保存到备份数据'); }; reader.readAsDataURL(file); e.target.value=''; };
       $('#modalCancel').onclick = () => closeModal(null); $('#modalOk').onclick = () => closeModal(els.modalInput.value.trim()); els.modalInput.addEventListener('keydown', e => { if(e.key==='Enter') closeModal(els.modalInput.value.trim()); });
       els.modalMask.addEventListener('click', e => { if(e.target===els.modalMask) closeModal(null); }); els.outlineOverlay.addEventListener('click', e => { if(e.target===els.outlineOverlay) els.outlineOverlay.classList.remove('show'); });
-      window.addEventListener('beforeunload', () => saveCurrentNode());
+      window.addEventListener('beforeunload', () => {
+        saveCurrentNode();
+        if (htmlCenterObjectUrl) URL.revokeObjectURL(htmlCenterObjectUrl);
+      });
       document.addEventListener('keydown', e => {
         if(e.key === 'Escape' && els.htmlCenterMask.classList.contains('show')) closeHtmlCenter();
         if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){ e.preventDefault(); saveCurrentNode(); idbSet(DATA_KEY,state); showToast('已手动保存'); }

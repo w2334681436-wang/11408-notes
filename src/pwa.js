@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || String(Date.now());
+  const version = window.__APP_VERSION__ || '20260524-1916-htmlfix';
 
   function showVersion() {
     const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');
@@ -20,18 +20,9 @@
         updateViaCache: 'none'
       });
 
-      // 每次打开都主动检查更新，避免旧 service worker 长期缓存旧文件。
+      // 只检查更新，不再自动 controllerchange reload，避免每次打开软件随机频闪/抖动。
       registration.update().catch(() => {});
 
-      // 新 SW 接管后自动刷新一次，让用户看到最新代码。
-      let refreshing = false;
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (refreshing) return;
-        refreshing = true;
-        window.location.reload();
-      });
-
-      // 如果已经有 waiting worker，立刻激活。
       if (registration.waiting) {
         registration.waiting.postMessage({ type: 'SKIP_WAITING' });
       }
