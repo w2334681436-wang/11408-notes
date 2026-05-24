@@ -307,19 +307,19 @@
       touch-action: none;
       user-select: none;
       background:
-        radial-gradient(circle at 12% 8%, rgba(37,99,235,.10), transparent 28%),
-        radial-gradient(circle at 88% 0%, rgba(124,58,237,.08), transparent 24%),
-        linear-gradient(180deg, #ffffff, #f8fafc);
+        radial-gradient(circle at 12% 8%, rgba(37,99,235,.075), transparent 28%),
+        radial-gradient(circle at 88% 0%, rgba(124,58,237,.055), transparent 24%),
+        linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
     }
     .mindmap.dragging { cursor: grabbing; }
     .mindmap::after {
-      content: '拖拽移动画布 · 点击节点跳转 · 点“回到中心”复位';
+      content: '拖拽移动画布 · 点击节点跳转 · 回到中心可复位';
       position: absolute;
       right: 16px;
       bottom: 12px;
       padding: 7px 10px;
       border-radius: 999px;
-      background: rgba(255,255,255,.78);
+      background: rgba(255,255,255,.82);
       border: 1px solid rgba(219,228,240,.9);
       color: #64748b;
       font-size: 12px;
@@ -330,88 +330,100 @@
       position: absolute;
       left: 0;
       top: 0;
-      min-width: max(100%, 900px);
+      min-width: max(100%, 960px);
       min-height: 100%;
       width: max-content;
-      padding: clamp(22px, 3vw, 38px);
+      padding: clamp(20px, 3vw, 34px);
       transform-origin: 0 0;
       will-change: transform;
     }
     .mind-level {
       display: grid;
       grid-template-columns: repeat(var(--mind-cols, 3), max-content);
-      gap: clamp(14px, 2vw, 22px);
+      gap: clamp(18px, 2.5vw, 30px);
       align-items: start;
       width: max-content;
-      max-width: none;
     }
     .mind-node {
       position: relative;
-      min-width: var(--node-min-w, 240px);
-      width: var(--node-w, auto);
-      max-width: var(--node-max-w, none);
-      border: 1px solid #dbe4f0;
-      border-left: 5px solid var(--brand);
+      box-sizing: border-box;
+      width: var(--node-w, 280px);
+      min-width: var(--node-w, 280px);
+      max-width: var(--node-w, 280px);
+      border: 1px solid rgba(203,213,225,.95);
+      border-left: 5px solid var(--node-color, #2563eb);
       border-radius: 18px;
-      background: rgba(255,255,255,.92);
-      box-shadow: 0 12px 28px rgba(15,23,42,.075);
-      padding: clamp(9px, 1vw, 12px);
+      background: rgba(255,255,255,.94);
+      box-shadow: 0 10px 24px rgba(15,23,42,.065);
+      padding: 12px;
+      overflow: visible;
     }
-    .mind-node.depth-1 { border-left-color: #7c3aed; box-shadow: 0 6px 18px rgba(15,23,42,.055); background: #ffffff; }
-    .mind-node.depth-2 { border-left-color: #10b981; background: #fbfdff; box-shadow: none; }
-    .mind-node.depth-3 { border-left-color: #f59e0b; background: #ffffff; box-shadow: none; }
-    .mind-node.has-many-children { padding: 10px; }
-    .mind-node.has-many-children > .mind-children { gap: 8px; margin-left: 8px; padding-left: 12px; }
+    .mind-node.depth-0 { --node-color: #2563eb; background: rgba(255,255,255,.96); }
+    .mind-node.depth-1 { --node-color: #7c3aed; box-shadow: 0 7px 18px rgba(15,23,42,.052); }
+    .mind-node.depth-2 { --node-color: #10b981; box-shadow: 0 5px 14px rgba(15,23,42,.042); background: #ffffff; }
+    .mind-node.depth-3 { --node-color: #f59e0b; box-shadow: 0 4px 12px rgba(15,23,42,.035); background: #ffffff; }
+    .mind-node.depth-4 { --node-color: #64748b; }
     .mind-node-title {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       flex-wrap: nowrap;
+      width: 100%;
       font-weight: 900;
       cursor: pointer;
-      padding: clamp(8px, .9vw, 10px) clamp(9px, 1vw, 12px);
+      padding: 10px 12px;
       border-radius: 14px;
       background: linear-gradient(180deg, #f8fafc, #eef4fb);
       color: #172033;
       line-height: 1.18;
-      min-height: 42px;
+      min-height: 44px;
       white-space: nowrap;
-      overflow: visible;
+      overflow: hidden;
+      transition: .15s ease;
     }
-    .mind-node.depth-0 > .mind-node-title { font-size: clamp(15px, 1.15vw, 18px); }
-    .mind-node.depth-1 > .mind-node-title { font-size: clamp(14px, 1.05vw, 16px); background: #f8f7ff; }
-    .mind-node.depth-2 > .mind-node-title { font-size: clamp(13px, .96vw, 15px); background: #f0fdf4; }
-    .mind-node.depth-3 > .mind-node-title { font-size: clamp(12px, .9vw, 14px); }
+    .mind-node.depth-1 > .mind-node-title { background: linear-gradient(180deg, #faf9ff, #f2efff); }
+    .mind-node.depth-2 > .mind-node-title { background: linear-gradient(180deg, #f0fdf4, #dcfce7); }
+    .mind-node.depth-3 > .mind-node-title { background: linear-gradient(180deg, #f8fafc, #eef4fb); }
     .mind-title-text {
-      display: inline-block;
+      display: block;
+      min-width: 0;
+      flex: 1 1 auto;
       white-space: nowrap;
-      flex: 0 0 auto;
-      max-width: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .mind-node-title::before {
       content: attr(data-level);
-      flex: none;
-      min-width: 28px;
+      flex: 0 0 auto;
+      min-width: 30px;
       height: 28px;
-      padding: 0 7px;
+      padding: 0 8px;
       border-radius: 999px;
       display: inline-grid;
       place-items: center;
-      background: #fff;
-      color: var(--brand);
+      background: rgba(255,255,255,.92);
+      color: var(--node-color, var(--brand));
       border: 1px solid #dbeafe;
       font-size: 12px;
       font-weight: 900;
     }
-    .mind-node-title:hover { background: var(--brand-soft); color: var(--brand); transform: translateY(-1px); }
+    .mind-node-title:hover {
+      background: var(--brand-soft);
+      color: var(--brand);
+      transform: translateY(-1px);
+      box-shadow: inset 0 0 0 1px rgba(37,99,235,.08);
+    }
     .mind-children {
       position: relative;
-      margin-top: 10px;
-      margin-left: 10px;
-      padding-left: 15px;
-      border-left: 2px solid #dbeafe;
+      margin-top: 12px;
+      margin-left: 12px;
+      padding-left: 16px;
+      border-left: 2px solid rgba(147,197,253,.85);
       display: grid;
-      gap: 10px;
+      gap: 12px;
+      justify-items: start;
+      width: max-content;
+      max-width: 100%;
     }
     .mind-children::before {
       content: '';
@@ -419,9 +431,19 @@
       top: 0;
       left: -2px;
       width: 2px;
-      height: 18px;
-      background: var(--brand);
+      height: 22px;
+      background: var(--node-color, var(--brand));
       border-radius: 999px;
+    }
+    .mind-node.has-many-children > .mind-children {
+      gap: 10px;
+    }
+    @media (max-width: 760px) {
+      .mindmap-viewport { min-width: max(100%, 720px); padding: 18px; }
+      .mind-level { gap: 16px; }
+      .mind-node { border-radius: 16px; padding: 10px; }
+      .mind-node-title { min-height: 40px; padding: 9px 10px; }
+      .mindmap::after { display: none; }
     }
 
     .modal { width: min(560px, 100%); background: #fff; border-radius: 22px; box-shadow: 0 30px 80px rgba(0,0,0,.22); padding: 18px; }
@@ -464,7 +486,7 @@
       .card { min-height: 70vh; border-radius: 16px; }
       .toolbar { overflow-x: auto; flex-wrap: nowrap; }
       .outline-overlay { padding: 10px; }
-      .mindmap { padding: 18px; }
+      .mindmap { padding: 0; }
       .node-heading input { width: 100%; }
       .preview { padding: 20px 16px 34px; }
     }
