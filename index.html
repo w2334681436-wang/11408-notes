@@ -20,14 +20,13 @@
   <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
   <script>
     (function () {
-      const pad = (n) => String(n).padStart(2, '0');
-      const d = new Date();
-      const autoVersion = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-      window.__APP_VERSION__ = autoVersion;
-      document.documentElement.setAttribute('data-app-version', autoVersion);
+      // 每次发布新版时只需要更新这里的版本号；不要每次打开都随机生成，否则 PWA/Service Worker 会反复重装并造成频闪。
+      const APP_VERSION = '20260524-1916-htmlfix';
+      window.__APP_VERSION__ = APP_VERSION;
+      document.documentElement.setAttribute('data-app-version', APP_VERSION);
       const css = document.createElement('link');
       css.rel = 'stylesheet';
-      css.href = `./styles/app.css?v=${autoVersion}`;
+      css.href = `./styles/app.css?v=${APP_VERSION}`;
       document.head.appendChild(css);
     })();
   </script>
