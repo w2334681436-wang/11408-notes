@@ -449,14 +449,89 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         exportedAt: new Date().toISOString(),
         data: state
       };
-      const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json;charset=utf-8'});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a');
-      a.href=url;
-      a.download='11408-notes-full-backup-'+new Date().toISOString().slice(0,10)+'.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast('已导出完整备份：文字、图片资源、HTML代码都在里面');
+      const text = JSON.stringify(backup, null, 2);
+      const filename = '11408-notes-full-backup-' + new Date().toISOString().slice(0,10) + '.json';
+      openExportDownloadPanel(filename, text, true);
+    }
+
+    function openExportDownloadPanel(filename, text, autoDownload = false) {
+      const oldPanel = document.getElementById('exportDownloadMask');
+      if (oldPanel) oldPanel.remove();
+
+      const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+
+      const mask = document.createElement('div');
+      mask.id = 'exportDownloadMask';
+      mask.style.cssText = 'position:fixed;inset:0;z-index:180;display:grid;place-items:center;padding:18px;background:rgba(15,23,42,.46);backdrop-filter:blur(10px);';
+
+      const panel = document.createElement('div');
+      panel.style.cssText = 'width:min(520px,94vw);background:#fff;border:1px solid #e5e7eb;border-radius:22px;box-shadow:0 30px 90px rgba(15,23,42,.28);padding:18px;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Arial,sans-serif;';
+
+      panel.innerHTML = `
+        <div style="font-size:18px;font-weight:900;margin-bottom:6px;">备份文件已生成</div>
+        <div style="font-size:13px;line-height:1.7;color:#64748b;margin-bottom:14px;">
+          如果浏览器没有自动下载，请点下面的“下载JSON备份”。手机浏览器有时会把文件保存到“下载/文件”App里。
+        </div>
+        <a id="exportRealDownloadLink"
+           download="${escapeAttr(filename)}"
+           href="${url}"
+           style="display:block;text-align:center;text-decoration:none;background:#2563eb;color:#fff;border-radius:14px;padding:12px 14px;font-weight:900;margin-bottom:10px;">
+          下载JSON备份
+        </a>
+        <button id="exportCopyBackupBtn"
+                style="width:100%;border:0;border-radius:14px;padding:11px 14px;background:#eff6ff;color:#2563eb;font-weight:800;margin-bottom:10px;">
+          复制JSON文本到剪贴板
+        </button>
+        <button id="exportCloseBtn"
+                style="width:100%;border:0;border-radius:14px;padding:10px 14px;background:#f8fafc;color:#172033;">
+          关闭
+        </button>
+      `;
+
+      mask.appendChild(panel);
+      document.body.appendChild(mask);
+
+      const link = panel.querySelector('#exportRealDownloadLink');
+      const close = () => {
+        URL.revokeObjectURL(url);
+        mask.remove();
+      };
+
+      panel.querySelector('#exportCloseBtn').onclick = close;
+      mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+
+      panel.querySelector('#exportCopyBackupBtn').onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          showToast('已复制JSON文本');
+        } catch (err) {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          try {
+            document.execCommand('copy');
+            showToast('已复制JSON文本');
+          } catch (copyErr) {
+            alert('复制失败，请使用“下载JSON备份”按钮。');
+          }
+          ta.remove();
+        }
+      };
+
+      if (autoDownload) {
+        setTimeout(() => {
+          try {
+            link.click();
+            showToast('备份已生成，请检查浏览器下载记录或点击弹窗按钮下载');
+          } catch (err) {
+            showToast('自动下载被浏览器拦截，请点击弹窗里的下载按钮');
+          }
+        }, 80);
+      }
     }
 
     function normalizeImportedData() {
