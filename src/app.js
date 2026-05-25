@@ -15,6 +15,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
 
     let state = { activeSubjectId: 'gaoshu', activeNodeId: null, expanded: {}, uiMode: 'preview', htmlVisible: true, subjects: [] };
     let mindPan = { x: 0, y: 0, scale: 1, dragging: false, startX: 0, startY: 0, baseX: 0, baseY: 0, moved: false };
+    let mindmapNeedsRefresh = true;
     let saveTimer = null;
     let modalResolve = null;
     let htmlCenterObjectUrl = null;
@@ -124,6 +125,35 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       btn.className = hasHtml ? 'soft' : 'ghost';
     }
 
+    function isOutlineOpen() {
+      return !!(els.outlineOverlay && els.outlineOverlay.classList.contains('show'));
+    }
+
+    function markMindmapDirty() {
+      mindmapNeedsRefresh = true;
+    }
+
+    function refreshMindmapIfOpen(options = {}) {
+      markMindmapDirty();
+      if (!isOutlineOpen()) return;
+      renderMindmap();
+      mindmapNeedsRefresh = false;
+      if (options.center !== false) requestAnimationFrame(centerMindmap);
+      else requestAnimationFrame(applyMindPan);
+    }
+
+    function scrollContentTop() {
+      requestAnimationFrame(() => {
+        const previewShell = document.querySelector('.preview-shell');
+        if (previewShell) previewShell.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+        if (els.mdEditor) els.mdEditor.scrollTop = 0;
+        if (els.htmlEditor) els.htmlEditor.scrollTop = 0;
+        const scrollingElement = document.scrollingElement || document.documentElement || document.body;
+        if (scrollingElement) scrollingElement.scrollTop = 0;
+        window.scrollTo?.(0, 0);
+      });
+    }
+
     function renderAll() { applyMode(); renderSubjects(); renderTree(); renderEditor(); runSearch(); updateHtmlGlobalButton(); }
 
     function renderSubjects() {
@@ -132,7 +162,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         const item = document.createElement('div');
         item.className = 'subject-item' + (s.id === state.activeSubjectId ? ' active' : '');
         item.innerHTML = `<div class="subject-badge">${escapeHtml(s.short)}</div><div class="subject-name">${escapeHtml(s.name)}</div>`;
-        item.onclick = () => { saveCurrentNode(); state.activeSubjectId = s.id; const first = flattenSubject(s)[0]; state.activeNodeId = first ? first.node.id : null; els.sidebar.classList.remove('show'); renderAll(); scheduleSave(); };
+        item.onclick = () => { saveCurrentNode(); closeHtmlCenter(); state.activeSubjectId = s.id; const first = flattenSubject(s)[0]; state.activeNodeId = first ? first.node.id : null; markMindmapDirty(); els.sidebar.classList.remove('show'); renderAll(); scrollContentTop(); scheduleSave(); };
         els.subjectList.appendChild(item);
       }
     }
@@ -246,17 +276,17 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       if (upBtn) upBtn.disabled = !canUp;
       if (downBtn) downBtn.disabled = !canDown;
     }
-    function selectNode(id) { saveCurrentNode(); closeHtmlCenter(); state.activeNodeId = id; const info = findNodeById(id); if (info) info.path.forEach(p => state.expanded[p.id] = true); els.sidebar.classList.remove('show'); renderTree(); renderEditor(); scheduleSave(); }
+    function selectNode(id) { saveCurrentNode(); closeHtmlCenter(); state.activeNodeId = id; const info = findNodeById(id); if (info) info.path.forEach(p => state.expanded[p.id] = true); els.sidebar.classList.remove('show'); renderTree(); renderEditor(); scrollContentTop(); scheduleSave(); }
     function saveCurrentNode() { const info = findNodeById(state.activeNodeId); if (!info) return; info.node.title = els.titleInput.value.trim() || '未命名小节'; info.node.md = els.mdEditor.value; info.node.html = els.htmlEditor.value; ensureNodeAssets(info.node); compactInlineBase64Images(info.node); if (els.mdEditor.value !== info.node.md) els.mdEditor.value = info.node.md; info.node.updatedAt = Date.now(); }
     function scheduleSave() { clearTimeout(saveTimer); if (els.saveState) els.saveState.textContent = '正在保存……'; saveTimer = setTimeout(async () => { saveCurrentNode(); await idbSet(DATA_KEY, state); if (els.saveState) els.saveState.textContent = '已保存到浏览器本地 IndexedDB · ' + new Date().toLocaleTimeString(); }, 300); }
     function showToast(msg) { els.toast.textContent = msg; els.toast.classList.add('show'); setTimeout(() => els.toast.classList.remove('show'), 1600); }
 
     function promptModal(title, placeholder='请输入名称', value='') { els.modalTitle.textContent = title; els.modalInput.placeholder = placeholder; els.modalInput.value = value; els.modalMask.classList.add('show'); setTimeout(() => els.modalInput.focus(), 50); return new Promise(resolve => modalResolve = resolve); }
     function closeModal(result=null) { els.modalMask.classList.remove('show'); if (modalResolve) modalResolve(result); modalResolve = null; }
-    async function addRoot() { const title = await promptModal('新建章', '例如：第三章 一元函数积分学'); if (!title) return; const node = createNode(title, 1); getActiveSubject().nodes.push(node); state.activeNodeId = node.id; state.expanded[node.id] = true; renderAll(); scheduleSave(); }
-    async function addChild(parentId=state.activeNodeId) { const info = findNodeById(parentId); if (!info) return; const title = await promptModal('新建子节', '例如：2.1 中值定理的使用条件'); if (!title) return; const node = createNode(title, (info.node.level || 1) + 1); info.node.children = info.node.children || []; info.node.children.push(node); state.expanded[info.node.id] = true; state.activeNodeId = node.id; renderAll(); scheduleSave(); }
-    async function addSibling() { const info = findNodeById(state.activeNodeId); if (!info) return; const title = await promptModal('新建同级小节', '例如：下一节标题'); if (!title) return; const node = createNode(title, info.node.level || 1); const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index + 1, 0, node); state.activeNodeId = node.id; renderAll(); scheduleSave(); }
-    function deleteNode() { const info = findNodeById(state.activeNodeId); if (!info) return; if (!confirm(`确定删除“${info.node.title}”以及它下面的所有子节吗？`)) return; const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index, 1); const arr = flattenSubject(); state.activeNodeId = arr[Math.min(info.index, arr.length - 1)]?.node.id || null; renderAll(); scheduleSave(); }
+    async function addRoot() { const title = await promptModal('新建章', '例如：第三章 一元函数积分学'); if (!title) return; const node = createNode(title, 1); getActiveSubject().nodes.push(node); state.activeNodeId = node.id; state.expanded[node.id] = true; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
+    async function addChild(parentId=state.activeNodeId) { const info = findNodeById(parentId); if (!info) return; const title = await promptModal('新建子节', '例如：2.1 中值定理的使用条件'); if (!title) return; const node = createNode(title, (info.node.level || 1) + 1); info.node.children = info.node.children || []; info.node.children.push(node); state.expanded[info.node.id] = true; state.activeNodeId = node.id; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
+    async function addSibling() { const info = findNodeById(state.activeNodeId); if (!info) return; const title = await promptModal('新建同级小节', '例如：下一节标题'); if (!title) return; const node = createNode(title, info.node.level || 1); const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index + 1, 0, node); state.activeNodeId = node.id; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
+    function deleteNode() { const info = findNodeById(state.activeNodeId); if (!info) return; if (!confirm(`确定删除“${info.node.title}”以及它下面的所有子节吗？`)) return; const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index, 1); const arr = flattenSubject(); state.activeNodeId = arr[Math.min(info.index, arr.length - 1)]?.node.id || null; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
     function goPrevNext(delta) { saveCurrentNode(); const arr = flattenSubject(); const idx = arr.findIndex(x => x.node.id === state.activeNodeId); const next = arr[idx + delta]; if (next) selectNode(next.node.id); }
 
     function moveActiveNode(delta) {
@@ -269,6 +299,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       list[info.index] = list[nextIndex];
       list[nextIndex] = temp;
       renderAll();
+      refreshMindmapIfOpen({ center: true });
       scheduleSave();
       showToast(delta < 0 ? '已上移当前小节' : '已下移当前小节');
     }
@@ -325,12 +356,17 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       for (const subject of state.subjects) walk(subject.nodes, (node,parent,index,path) => { const content = [node.title,node.md,node.html].join('\n'); const pos = content.toLowerCase().indexOf(q.toLowerCase()); if(pos>=0){ const start=Math.max(0,pos-36), end=Math.min(content.length,pos+q.length+80); results.push({subject,node,path,snippet:content.slice(start,end)}); } });
       els.searchResults.innerHTML = results.length ? results.slice(0,50).map(r => `<div class="result-item" data-subject="${r.subject.id}" data-node="${r.node.id}"><div class="result-title">${highlight(r.node.title,q)}</div><div class="result-path">${escapeHtml(r.subject.name)} / ${r.path.map(p=>escapeHtml(p.title)).join(' / ')}</div><div class="result-snippet">${highlight(r.snippet.replace(/\n+/g,' '),q)}</div></div>`).join('') : '<div class="empty"><div><h2>没搜到</h2><p>换个关键词试试，例如“极限”“Cache”“死锁”。</p></div></div>';
       els.searchResults.classList.add('show');
-      els.searchResults.querySelectorAll('.result-item').forEach(item => item.onclick = () => { saveCurrentNode(); state.activeSubjectId = item.dataset.subject; state.activeNodeId = item.dataset.node; const info = findNodeById(state.activeNodeId, getActiveSubject()); if (info) info.path.forEach(p => state.expanded[p.id] = true); els.globalSearch.value=''; els.searchResults.classList.remove('show'); renderAll(); showToast('已跳转到搜索结果所在小节'); });
+      els.searchResults.querySelectorAll('.result-item').forEach(item => item.onclick = () => { saveCurrentNode(); closeHtmlCenter(); state.activeSubjectId = item.dataset.subject; state.activeNodeId = item.dataset.node; const info = findNodeById(state.activeNodeId, getActiveSubject()); if (info) info.path.forEach(p => state.expanded[p.id] = true); els.globalSearch.value=''; els.searchResults.classList.remove('show'); renderAll(); scrollContentTop(); showToast('已跳转到搜索结果所在小节'); });
     }
     function highlight(text,q){ const safe=escapeHtml(text); const reg=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'ig'); return safe.replace(reg,m=>`<mark>${m}</mark>`); }
 
     function renderMindmap() {
+      saveCurrentNode();
       const subject = getActiveSubject();
+      if (!subject) {
+        els.mindmap.innerHTML = '<div class="empty"><div><h2>暂无科目</h2><p>请先创建或选择科目。</p></div></div>';
+        return;
+      }
       els.outlineTitle.textContent = subject.name + ' · 全书思维框架';
       const levelName = ['章', '节', '小节', '点', '项'];
 
@@ -400,6 +436,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       viewport.appendChild(level);
       els.mindmap.innerHTML = '';
       els.mindmap.appendChild(viewport);
+      mindmapNeedsRefresh = false;
     }
 
     function applyMindPan() {
@@ -590,7 +627,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#addRootBtn').onclick = addRoot; $('#addChildBtn').onclick = () => addChild(); $('#addSiblingBtn').onclick = addSibling; $('#moveUpBtn').onclick = () => moveActiveNode(-1); $('#moveDownBtn').onclick = () => moveActiveNode(1); $('#deleteNodeBtn').onclick = deleteNode;
       $('#prevBtn').onclick = () => goPrevNext(-1); $('#nextBtn').onclick = () => goPrevNext(1);
       $('#fullscreenBtn').onclick = () => toggleFullscreen(document.documentElement);
-      $('#outlineBtn').onclick = () => { renderMindmap(); els.outlineOverlay.classList.add('show'); requestAnimationFrame(centerMindmap); };
+      $('#outlineBtn').onclick = () => { saveCurrentNode(); renderMindmap(); els.outlineOverlay.classList.add('show'); requestAnimationFrame(centerMindmap); };
       $('#closeOutlineBtn').onclick = () => els.outlineOverlay.classList.remove('show'); $('#outlineCenterBtn').onclick = centerMindmap; $('#outlineFullBtn').onclick = () => toggleFullscreen(document.querySelector('.outline-shell'));
       $('#focusEditBtn').onclick = () => toggleFullscreen(document.querySelector('.editor-card')); $('#focusPreviewBtn').onclick = () => toggleFullscreen(document.querySelector('.preview-card'));
       $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
@@ -611,7 +648,9 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
             normalizeImportedData();
             await idbSet(DATA_KEY,state);
             els.importMask.classList.remove('show');
+            markMindmapDirty();
             renderAll();
+            scrollContentTop();
             showToast('已从 JSON 文件导入完整备份');
           } catch(err) {
             alert('导入失败：JSON 文件格式不正确');
@@ -631,11 +670,13 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
           normalizeImportedData();
           await idbSet(DATA_KEY,state);
           els.importMask.classList.remove('show');
+          markMindmapDirty();
           renderAll();
+          scrollContentTop();
           showToast('导入成功，已恢复文字、图片和HTML代码');
         } catch(e){ alert('导入失败：JSON 格式不正确'); }
       };
-      els.titleInput.addEventListener('input', () => { onEditorInput(); renderTree(); }); els.mdEditor.addEventListener('input', onEditorInput); els.htmlEditor.addEventListener('input', onEditorInput); els.globalSearch.addEventListener('input', runSearch);
+      els.titleInput.addEventListener('input', () => { onEditorInput(); renderTree(); refreshMindmapIfOpen({ center: false }); }); els.mdEditor.addEventListener('input', onEditorInput); els.htmlEditor.addEventListener('input', onEditorInput); els.globalSearch.addEventListener('input', runSearch);
       document.addEventListener('click', e => { if(!els.searchResults.contains(e.target) && !els.globalSearch.contains(e.target)) els.searchResults.classList.remove('show'); });
       $('#toolbar').addEventListener('click', e => { const btn=e.target.closest('button'); if(!btn) return; if(btn.dataset.md) insertAtCursor(btn.dataset.md); if(btn.dataset.wrap) insertAtCursor(btn.dataset.wrap,true); if(btn.dataset.block) insertAtCursor(btn.dataset.block); });
       $('#imageBtn').onclick = () => $('#imageInput').click();
@@ -662,6 +703,6 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       state.uiMode = 'preview'; state.htmlVisible = state.htmlVisible !== false;
       normalizeImportedData();
       for (const subject of state.subjects) walk(subject.nodes, node => { if (state.expanded[node.id] === undefined) state.expanded[node.id] = true; });
-      renderAll(); await idbSet(DATA_KEY, state);
+      renderAll(); scrollContentTop(); await idbSet(DATA_KEY, state);
     }
     init();
