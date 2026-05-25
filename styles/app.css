@@ -313,7 +313,7 @@
     }
     .mindmap.dragging { cursor: grabbing; }
     .mindmap::after {
-      content: '拖拽移动画布 · 点击节点跳转 · 回到中心可复位';
+      content: '拖拽移动画布 · 滚轮可缩放 · 点击节点跳转 · 回到中心可复位';
       position: absolute;
       right: 16px;
       bottom: 12px;
@@ -340,6 +340,8 @@
     .mind-level {
       display: grid;
       grid-template-columns: repeat(var(--mind-cols, 3), max-content);
+      grid-auto-flow: column;
+      grid-auto-columns: max-content;
       gap: clamp(18px, 2.5vw, 30px);
       align-items: start;
       width: max-content;
