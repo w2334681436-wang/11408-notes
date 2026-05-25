@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260525-2056-mindmapscroll';
+  const version = window.__APP_VERSION__ || '20260525-2110-mindmaprowzoom';
 
   function showVersion() {
     const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');
