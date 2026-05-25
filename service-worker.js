@@ -1,4 +1,4 @@
-const APP_VERSION = '20260524-1916-htmlfix';
+const APP_VERSION = '20260525-2056-mindmapscroll';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_NAME = `11408-notes-cache-${SW_VERSION}`;
 
