@@ -1,4 +1,4 @@
-const APP_VERSION = '20260525-2110-mindmaprowzoom';
+const APP_VERSION = '20260530-0830-markdownmathfix';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_NAME = `11408-notes-cache-${SW_VERSION}`;
 
