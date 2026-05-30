@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260530-0830-markdownmathfix';
+  const version = window.__APP_VERSION__ || '20260530-1120-focuspreview-nav';
 
   function showVersion() {
     const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');

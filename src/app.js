@@ -117,12 +117,15 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     function updateHtmlGlobalButton() {
-      const btn = $('#htmlGlobalBtn');
-      if (!btn) return;
       const hasHtml = currentHasHtml();
-      btn.disabled = !hasHtml;
-      btn.textContent = hasHtml ? '显示HTML' : '无HTML';
-      btn.className = hasHtml ? 'soft' : 'ghost';
+      const buttons = ['htmlGlobalBtn', 'focusHtmlBtn']
+        .map(id => $('#' + id))
+        .filter(Boolean);
+      buttons.forEach(btn => {
+        btn.disabled = !hasHtml;
+        btn.textContent = hasHtml ? '显示HTML' : '无HTML';
+        btn.className = hasHtml ? (btn.id === 'htmlGlobalBtn' ? 'soft' : 'small soft') : (btn.id === 'htmlGlobalBtn' ? 'ghost' : 'small ghost');
+      });
     }
 
     function isOutlineOpen() {
@@ -262,11 +265,48 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       }
     }
 
+    function collectNavigableNodes(subject = getActiveSubject()) {
+      const arr = [];
+      if (!subject) return arr;
+      const collect = (node) => {
+        if (node.children && node.children.length) node.children.forEach(collect);
+        else arr.push(node);
+      };
+      subject.nodes.forEach(chapter => {
+        if (chapter.children && chapter.children.length) chapter.children.forEach(collect);
+        else arr.push(chapter);
+      });
+      return arr;
+    }
+
+    function firstNavigableDescendant(node) {
+      if (!node) return null;
+      if (!node.children || !node.children.length) return node;
+      return firstNavigableDescendant(node.children[0]);
+    }
+
+    function lastNavigableDescendant(node) {
+      if (!node) return null;
+      if (!node.children || !node.children.length) return node;
+      return lastNavigableDescendant(node.children[node.children.length - 1]);
+    }
+
+    function getNavigationPosition() {
+      const arr = collectNavigableNodes();
+      let idx = arr.findIndex(node => node.id === state.activeNodeId);
+      if (idx >= 0) return { arr, idx };
+      const info = findNodeById(state.activeNodeId);
+      const first = info ? firstNavigableDescendant(info.node) : null;
+      if (first) idx = arr.findIndex(node => node.id === first.id);
+      return { arr, idx };
+    }
+
     function updatePrevNextState() {
-      const arr = flattenSubject();
-      const idx = arr.findIndex(x => x.node.id === state.activeNodeId);
-      $('#prevBtn').disabled = idx <= 0;
-      $('#nextBtn').disabled = idx < 0 || idx >= arr.length - 1;
+      const { arr, idx } = getNavigationPosition();
+      const canPrev = idx > 0;
+      const canNext = idx >= 0 && idx < arr.length - 1;
+      ['prevBtn', 'focusPrevBtn'].forEach(id => { const btn = $('#' + id); if (btn) btn.disabled = !canPrev; });
+      ['nextBtn', 'focusNextBtn'].forEach(id => { const btn = $('#' + id); if (btn) btn.disabled = !canNext; });
       const info = findNodeById(state.activeNodeId);
       const list = info ? (info.parent ? info.parent.children : getActiveSubject().nodes) : [];
       const canUp = !!info && info.index > 0;
@@ -287,7 +327,12 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     async function addChild(parentId=state.activeNodeId) { const info = findNodeById(parentId); if (!info) return; const title = await promptModal('新建子节', '例如：2.1 中值定理的使用条件'); if (!title) return; const node = createNode(title, (info.node.level || 1) + 1); info.node.children = info.node.children || []; info.node.children.push(node); state.expanded[info.node.id] = true; state.activeNodeId = node.id; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
     async function addSibling() { const info = findNodeById(state.activeNodeId); if (!info) return; const title = await promptModal('新建同级小节', '例如：下一节标题'); if (!title) return; const node = createNode(title, info.node.level || 1); const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index + 1, 0, node); state.activeNodeId = node.id; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
     function deleteNode() { const info = findNodeById(state.activeNodeId); if (!info) return; if (!confirm(`确定删除“${info.node.title}”以及它下面的所有子节吗？`)) return; const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index, 1); const arr = flattenSubject(); state.activeNodeId = arr[Math.min(info.index, arr.length - 1)]?.node.id || null; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
-    function goPrevNext(delta) { saveCurrentNode(); const arr = flattenSubject(); const idx = arr.findIndex(x => x.node.id === state.activeNodeId); const next = arr[idx + delta]; if (next) selectNode(next.node.id); }
+    function goPrevNext(delta) {
+      saveCurrentNode();
+      const { arr, idx } = getNavigationPosition();
+      const next = arr[idx + delta];
+      if (next) selectNode(next.id);
+    }
 
     function moveActiveNode(delta) {
       const info = findNodeById(state.activeNodeId);
@@ -644,6 +689,33 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       }
     }
 
+    function setPreviewFullscreenState() {
+      const previewCard = document.querySelector('.preview-card');
+      const active = document.fullscreenElement === previewCard;
+      if (previewCard) previewCard.classList.toggle('is-preview-fullscreen', active);
+      if (active && previewCard && els.htmlCenterMask.parentElement !== previewCard) {
+        previewCard.appendChild(els.htmlCenterMask);
+      } else if (!active && els.htmlCenterMask.parentElement !== document.body) {
+        document.body.appendChild(els.htmlCenterMask);
+      }
+      updatePrevNextState();
+      updateHtmlGlobalButton();
+    }
+
+    function switchToEditModeFromFocus() {
+      saveCurrentNode();
+      state.uiMode = 'edit';
+      const finish = () => {
+        applyMode();
+        renderEditor();
+        scrollContentTop();
+        scheduleSave();
+      };
+      if (document.fullscreenElement) {
+        document.exitFullscreen?.().then(finish).catch(finish);
+      } else finish();
+    }
+
     function bindEvents() {
       bindMindmapPan();
       $('#modeToggleBtn').onclick = () => { saveCurrentNode(); state.uiMode = state.uiMode === 'preview' ? 'edit' : 'preview'; applyMode(); renderEditor(); scheduleSave(); };
@@ -654,10 +726,15 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       els.htmlCenterMask.addEventListener('click', e => { if (e.target === els.htmlCenterMask) closeHtmlCenter(); });
       $('#addRootBtn').onclick = addRoot; $('#addChildBtn').onclick = () => addChild(); $('#addSiblingBtn').onclick = addSibling; $('#moveUpBtn').onclick = () => moveActiveNode(-1); $('#moveDownBtn').onclick = () => moveActiveNode(1); $('#deleteNodeBtn').onclick = deleteNode;
       $('#prevBtn').onclick = () => goPrevNext(-1); $('#nextBtn').onclick = () => goPrevNext(1);
+      $('#focusPrevBtn').onclick = () => goPrevNext(-1); $('#focusNextBtn').onclick = () => goPrevNext(1);
+      $('#focusHtmlBtn').onclick = openHtmlCenter;
+      $('#focusEditBtn2').onclick = switchToEditModeFromFocus;
+      $('#focusExitBtn').onclick = () => { if (document.fullscreenElement) document.exitFullscreen?.(); };
       $('#fullscreenBtn').onclick = () => toggleFullscreen(document.documentElement);
       $('#outlineBtn').onclick = () => { saveCurrentNode(); renderMindmap(); els.outlineOverlay.classList.add('show'); requestAnimationFrame(centerMindmap); };
       $('#closeOutlineBtn').onclick = () => els.outlineOverlay.classList.remove('show'); $('#outlineCenterBtn').onclick = centerMindmap; $('#outlineFullBtn').onclick = () => toggleFullscreen(document.querySelector('.outline-shell'));
       $('#focusEditBtn').onclick = () => toggleFullscreen(document.querySelector('.editor-card')); $('#focusPreviewBtn').onclick = () => toggleFullscreen(document.querySelector('.preview-card'));
+      document.addEventListener('fullscreenchange', setPreviewFullscreenState);
       $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
       $('#importCancel').onclick = () => els.importMask.classList.remove('show');
       $('#importFileBtn').onclick = () => $('#importFileInput').click();
