@@ -316,8 +316,31 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
 
     function mdToHtml(md) {
       if (!md.trim()) return '<div class="empty"><div><h2>开始写这一小节</h2><p>点击顶部“编辑”进入双栏编辑；默认页面只优先显示渲染结果。</p></div></div>';
+
       const codeBlocks = [];
-      md = md.replace(/```([\s\S]*?)```/g, (_, code) => { const id = `@@CODE${codeBlocks.length}@@`; const firstLine = code.split('\n')[0].trim(); let body = code; if (/^[a-zA-Z0-9#+-]+$/.test(firstLine)) body = code.split('\n').slice(1).join('\n'); codeBlocks.push(`<pre><code>${escapeHtml(body.trim())}</code></pre>`); return id; });
+      md = md.replace(/```([\s\S]*?)```/g, (_, code) => {
+        const id = `@@CODE${codeBlocks.length}@@`;
+        const firstLine = code.split('\n')[0].trim();
+        let body = code;
+        if (/^[a-zA-Z0-9#+-]+$/.test(firstLine)) body = code.split('\n').slice(1).join('\n');
+        codeBlocks.push(`<pre><code>${escapeHtml(body.trim())}</code></pre>`);
+        return `\n${id}\n`;
+      });
+
+      const mathBlocks = [];
+      const protectMath = (body) => {
+        const id = `@@MATH${mathBlocks.length}@@`;
+        mathBlocks.push(`<div class="math-block">${body}</div>`);
+        return `\n${id}\n`;
+      };
+
+      // 保护跨行块公式，避免 Markdown 行包装把 $$...$$ 或 \[...\] 拆成多个 <p> 后 MathJax 无法识别。
+      md = md
+        .replace(/(^|\n)\s*\$\$\s*\n([\s\S]*?)\n\s*\$\$\s*(?=\n|$)/g, (_, start, body) => start + protectMath(`$$\n${body.trim()}\n$$`))
+        .replace(/(^|\n)\s*\\\[\s*\n([\s\S]*?)\n\s*\\\]\s*(?=\n|$)/g, (_, start, body) => start + protectMath(`\\[\n${body.trim()}\n\\]`))
+        .replace(/(^|\n)\s*\$\$([\s\S]*?)\$\$\s*(?=\n|$)/g, (_, start, body) => start + protectMath(`$$${body.trim()}$$`))
+        .replace(/(^|\n)\s*\\\[([\s\S]*?)\\\]\s*(?=\n|$)/g, (_, start, body) => start + protectMath(`\\[${body.trim()}\\]`));
+
       let html = escapeHtml(md)
         .replace(/^###### (.*)$/gm, '<h6>$1</h6>').replace(/^##### (.*)$/gm, '<h5>$1</h5>').replace(/^#### (.*)$/gm, '<h4>$1</h4>').replace(/^### (.*)$/gm, '<h3>$1</h3>').replace(/^## (.*)$/gm, '<h2>$1</h2>').replace(/^# (.*)$/gm, '<h1>$1</h1>')
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -333,18 +356,23 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         })
         .replace(/!\[([^\]]*)\]\((data:image\/[^)]+)\)/g, '<img alt="$1" src="$2" />')
         .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
       const lines = html.split('\n'); const out = []; let inUl=false, inQuote=false, tableBuffer=[];
       const flushUl=()=>{ if(inUl){out.push('</ul>'); inUl=false;} }; const flushQuote=()=>{ if(inQuote){out.push('</blockquote>'); inQuote=false;} };
       const flushTable=()=>{ if(!tableBuffer.length) return; if(tableBuffer.length>=2 && /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(tableBuffer[1])) { const rows = tableBuffer.filter((_,i)=>i!==1).map(row=>row.replace(/^\||\|$/g,'').split('|').map(x=>x.trim())); const head = rows.shift() || []; out.push('<table><thead><tr>'+head.map(c=>`<th>${c}</th>`).join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>`<td>${c}</td>`).join('')+'</tr>').join('')+'</tbody></table>'); } else out.push(...tableBuffer.map(x=>`<p>${x}</p>`)); tableBuffer=[]; };
       for (const raw of lines) {
         const line = raw.trimEnd();
-        if (line.startsWith('@@CODE')) { flushUl(); flushQuote(); flushTable(); out.push(line); continue; }
+        if (line.startsWith('@@CODE') || line.startsWith('@@MATH')) { flushUl(); flushQuote(); flushTable(); out.push(line); continue; }
         if (/^\|.*\|$/.test(line.trim())) { flushUl(); flushQuote(); tableBuffer.push(line.trim()); continue; } else flushTable();
         if (/^[-*+]\s+/.test(line.trim())) { flushQuote(); if(!inUl){out.push('<ul>'); inUl=true;} out.push(`<li>${line.trim().replace(/^[-*+]\s+/, '')}</li>`); continue; } else flushUl();
         if (/^&gt;\s?/.test(line.trim())) { if(!inQuote){out.push('<blockquote>'); inQuote=true;} out.push(line.trim().replace(/^&gt;\s?/, '') + '<br>'); continue; } else flushQuote();
         if (/^<h\d|^<img|^<pre|^<table/.test(line.trim())) out.push(line); else if (line.trim()==='') out.push(''); else out.push(`<p>${line}</p>`);
       }
-      flushUl(); flushQuote(); flushTable(); html = out.join('\n'); codeBlocks.forEach((block,i)=> html = html.replace(`@@CODE${i}@@`, block)); return html;
+      flushUl(); flushQuote(); flushTable();
+      html = out.join('\n');
+      codeBlocks.forEach((block,i)=> html = html.replace(`@@CODE${i}@@`, block));
+      mathBlocks.forEach((block,i)=> html = html.replace(`@@MATH${i}@@`, block));
+      return html;
     }
 
     function escapeHtml(str) { return String(str).replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s])); }
