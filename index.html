@@ -21,7 +21,7 @@
   <script>
     (function () {
       // 每次发布新版时只需要更新这里的版本号；不要每次打开都随机生成，否则 PWA/Service Worker 会反复重装并造成频闪。
-      const APP_VERSION = '20260530-0830-markdownmathfix';
+      const APP_VERSION = '20260530-1120-focuspreview-nav';
       window.__APP_VERSION__ = APP_VERSION;
       document.documentElement.setAttribute('data-app-version', APP_VERSION);
       const css = document.createElement('link');
@@ -131,6 +131,16 @@
               <div class="mini-text" id="saveState">已保存到浏览器本地 IndexedDB</div>
             </div>
             <button class="small" id="focusPreviewBtn">专注预览</button>
+          </div>
+          <div class="focus-preview-topbar" id="focusPreviewTopbar">
+            <div class="focus-preview-title">专注预览</div>
+            <div class="focus-preview-actions">
+              <button class="small soft" id="focusPrevBtn">上一节</button>
+              <button class="small soft" id="focusNextBtn">下一节</button>
+              <button class="small soft" id="focusHtmlBtn">显示HTML</button>
+              <button class="small primary" id="focusEditBtn2">切换编辑</button>
+              <button class="small" id="focusExitBtn">退出全屏</button>
+            </div>
           </div>
           <div class="preview-shell">
             <article class="preview" id="preview"></article>
