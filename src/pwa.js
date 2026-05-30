@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260530-1120-focuspreview-nav';
+  const version = window.__APP_VERSION__ || '20260530-2042-fullscreen-layoutfix';
 
   function showVersion() {
     const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');
