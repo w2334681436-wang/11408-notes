@@ -197,6 +197,59 @@
     }
 
     .preview-card { position: relative; }
+    .focus-preview-topbar {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.96);
+      backdrop-filter: blur(14px);
+      z-index: 5;
+    }
+    .focus-preview-title {
+      font-weight: 900;
+      color: #172033;
+      white-space: nowrap;
+    }
+    .focus-preview-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .preview-card:fullscreen,
+    .preview-card.is-preview-fullscreen {
+      width: 100vw;
+      height: 100vh;
+      border-radius: 0;
+      border: 0;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+    }
+    .preview-card:fullscreen .preview-head,
+    .preview-card.is-preview-fullscreen .preview-head { display: none; }
+    .preview-card:fullscreen .focus-preview-topbar,
+    .preview-card.is-preview-fullscreen .focus-preview-topbar { display: flex; }
+    .preview-card:fullscreen .preview-shell,
+    .preview-card.is-preview-fullscreen .preview-shell { flex: 1; min-height: 0; }
+    .preview-card:fullscreen .preview,
+    .preview-card.is-preview-fullscreen .preview {
+      max-width: 1080px;
+      margin: 0 auto;
+      width: 100%;
+      padding-top: 28px;
+    }
+    .preview-card:fullscreen .html-center-mask,
+    .preview-card.is-preview-fullscreen .html-center-mask {
+      position: absolute;
+      inset: 0;
+      z-index: 50;
+    }
     .preview-shell { flex: 1; min-height: 0; overflow: auto; background: #fff; }
     .preview {
       min-height: 100%; padding: 28px min(7vw, 70px) 42px;
@@ -502,4 +555,17 @@
 }
 .math-block mjx-container[display="true"] {
   margin: .6em 0 !important;
+}
+
+
+@media (max-width: 640px) {
+  .focus-preview-topbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .focus-preview-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
 }
