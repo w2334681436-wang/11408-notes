@@ -15,7 +15,7 @@
     }
 
     * { box-sizing: border-box; }
-    html, body { height: 100%; }
+    html, body { height: 100%; width: 100%; max-width: 100%; overflow: hidden; }
     body {
       margin: 0;
       overflow: hidden;
@@ -44,7 +44,11 @@
     button:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
 
     .app {
+      width: 100vw;
+      width: var(--app-vw, 100dvw);
+      max-width: 100vw;
       height: 100vh;
+      height: var(--app-vh, 100dvh);
       display: grid;
       grid-template-columns: 280px 1fr;
       grid-template-rows: 64px 1fr;
@@ -515,6 +519,70 @@
       transition: .25s ease; z-index: 130; font-size: 14px;
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+
+
+    /* Fullscreen/layout hardening: fixes tablet Chrome/PWA cases where the app
+       keeps an old viewport size after entering fullscreen, causing blank area on
+       the right/bottom and unclickable controls. */
+    :fullscreen { overflow: hidden !important; }
+    .app:fullscreen,
+    .app.is-app-fullscreen {
+      width: 100vw !important;
+      width: var(--app-vw, 100dvw) !important;
+      max-width: none !important;
+      height: 100vh !important;
+      height: var(--app-vh, 100dvh) !important;
+      min-height: 0 !important;
+      overflow: hidden !important;
+      background: var(--bg);
+    }
+    .app:fullscreen .topbar,
+    .app.is-app-fullscreen .topbar {
+      position: relative !important;
+      top: auto !important;
+      left: auto !important;
+      right: auto !important;
+      flex: none;
+      z-index: 80;
+    }
+    .app:fullscreen .main,
+    .app.is-app-fullscreen .main,
+    .app:fullscreen .sidebar,
+    .app.is-app-fullscreen .sidebar,
+    .app:fullscreen .workspace,
+    .app.is-app-fullscreen .workspace {
+      min-height: 0;
+      min-width: 0;
+    }
+    .app:fullscreen .workspace,
+    .app.is-app-fullscreen .workspace {
+      width: 100%;
+      max-width: none;
+      overflow: hidden;
+    }
+    .preview-card:fullscreen,
+    .preview-card.is-preview-fullscreen,
+    .editor-card:fullscreen {
+      width: 100vw !important;
+      width: var(--app-vw, 100dvw) !important;
+      max-width: none !important;
+      height: 100vh !important;
+      height: var(--app-vh, 100dvh) !important;
+      max-height: none !important;
+      overflow: hidden !important;
+    }
+    .preview-card:fullscreen .focus-preview-topbar,
+    .preview-card.is-preview-fullscreen .focus-preview-topbar {
+      position: relative;
+      z-index: 90;
+      flex: none;
+      pointer-events: auto;
+    }
+    .preview-card:fullscreen .focus-preview-actions,
+    .preview-card.is-preview-fullscreen .focus-preview-actions {
+      pointer-events: auto;
+    }
 
     @media (max-width: 980px) {
       .app { grid-template-columns: 1fr; grid-template-areas: "top" "main"; }
