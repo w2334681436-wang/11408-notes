@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260530-2042-fullscreen-layoutfix';
+  const version = window.__APP_VERSION__ || '20260601-2055-fencedcodefix';
 
   function showVersion() {
     const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');

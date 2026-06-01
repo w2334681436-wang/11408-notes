@@ -363,13 +363,14 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       if (!md.trim()) return '<div class="empty"><div><h2>开始写这一小节</h2><p>点击顶部“编辑”进入双栏编辑；默认页面只优先显示渲染结果。</p></div></div>';
 
       const codeBlocks = [];
-      md = md.replace(/```([\s\S]*?)```/g, (_, code) => {
+      // 保护围栏代码块：同时支持 GitHub 常见的 ```lang 和 ~~~lang 写法。
+      // 必须在公式保护前执行，避免代码块里的 $$、\[ 被误当作公式解析。
+      md = md.replace(/(^|\n)(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/g, (_, prefix, fence, lang, code) => {
         const id = `@@CODE${codeBlocks.length}@@`;
-        const firstLine = code.split('\n')[0].trim();
-        let body = code;
-        if (/^[a-zA-Z0-9#+-]+$/.test(firstLine)) body = code.split('\n').slice(1).join('\n');
-        codeBlocks.push(`<pre><code>${escapeHtml(body.trim())}</code></pre>`);
-        return `\n${id}\n`;
+        const language = String(lang || '').trim().replace(/[^a-zA-Z0-9_#+.-]/g, '');
+        const langClass = language ? ` class="language-${escapeAttr(language)}"` : '';
+        codeBlocks.push(`<pre><code${langClass}>${escapeHtml(code.replace(/^\n+|\n+$/g, ''))}</code></pre>`);
+        return `${prefix}${id}\n`;
       });
 
       const mathBlocks = [];
@@ -582,25 +583,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         applyMindPan();
       }, { passive: false });
     }
-    function syncViewportSize() {
-      const vv = window.visualViewport;
-      const w = Math.round(vv?.width || window.innerWidth || document.documentElement.clientWidth || 0);
-      const h = Math.round(vv?.height || window.innerHeight || document.documentElement.clientHeight || 0);
-      if (w > 0) document.documentElement.style.setProperty('--app-vw', w + 'px');
-      if (h > 0) document.documentElement.style.setProperty('--app-vh', h + 'px');
-    }
-
-    async function toggleFullscreen(target=els.app || document.documentElement){
-      syncViewportSize();
-      try {
-        if(!document.fullscreenElement) await target.requestFullscreen?.();
-        else await document.exitFullscreen?.();
-      } catch (err) {
-        console.warn('fullscreen failed:', err);
-      }
-      setTimeout(syncViewportSize, 60);
-      setTimeout(syncViewportSize, 220);
-    }
+    function toggleFullscreen(target=document.documentElement){ if(!document.fullscreenElement) target.requestFullscreen?.(); else document.exitFullscreen?.(); }
     function exportData(){
       saveCurrentNode();
       const backup = {
@@ -708,11 +691,8 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     function setPreviewFullscreenState() {
-      syncViewportSize();
       const previewCard = document.querySelector('.preview-card');
       const active = document.fullscreenElement === previewCard;
-      const appFullscreen = document.fullscreenElement === els.app || document.fullscreenElement === document.documentElement;
-      if (els.app) els.app.classList.toggle('is-app-fullscreen', appFullscreen);
       if (previewCard) previewCard.classList.toggle('is-preview-fullscreen', active);
       if (active && previewCard && els.htmlCenterMask.parentElement !== previewCard) {
         previewCard.appendChild(els.htmlCenterMask);
@@ -751,15 +731,11 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#focusHtmlBtn').onclick = openHtmlCenter;
       $('#focusEditBtn2').onclick = switchToEditModeFromFocus;
       $('#focusExitBtn').onclick = () => { if (document.fullscreenElement) document.exitFullscreen?.(); };
-      $('#fullscreenBtn').onclick = () => toggleFullscreen(els.app || document.documentElement);
+      $('#fullscreenBtn').onclick = () => toggleFullscreen(document.documentElement);
       $('#outlineBtn').onclick = () => { saveCurrentNode(); renderMindmap(); els.outlineOverlay.classList.add('show'); requestAnimationFrame(centerMindmap); };
       $('#closeOutlineBtn').onclick = () => els.outlineOverlay.classList.remove('show'); $('#outlineCenterBtn').onclick = centerMindmap; $('#outlineFullBtn').onclick = () => toggleFullscreen(document.querySelector('.outline-shell'));
       $('#focusEditBtn').onclick = () => toggleFullscreen(document.querySelector('.editor-card')); $('#focusPreviewBtn').onclick = () => toggleFullscreen(document.querySelector('.preview-card'));
       document.addEventListener('fullscreenchange', setPreviewFullscreenState);
-      window.addEventListener('resize', syncViewportSize);
-      window.addEventListener('orientationchange', () => setTimeout(syncViewportSize, 120));
-      window.visualViewport?.addEventListener('resize', syncViewportSize);
-      window.visualViewport?.addEventListener('scroll', syncViewportSize);
       $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
       $('#importCancel').onclick = () => els.importMask.classList.remove('show');
       $('#importFileBtn').onclick = () => $('#importFileInput').click();
@@ -827,7 +803,6 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     async function init() {
-      syncViewportSize();
       bindEvents();
       const saved = await idbGet(DATA_KEY).catch(() => null);
       state = saved || defaultData();
