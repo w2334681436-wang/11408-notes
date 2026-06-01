@@ -1,4 +1,4 @@
-const APP_VERSION = '20260530-2042-fullscreen-layoutfix';
+const APP_VERSION = '20260601-2055-fencedcodefix';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_NAME = `11408-notes-cache-${SW_VERSION}`;
 
