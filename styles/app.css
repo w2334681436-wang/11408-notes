@@ -692,3 +692,53 @@
 @media (max-width: 640px) {
   .page-searchbox { order: 3; width: 100%; flex: 1 0 100%; max-width: none; }
 }
+
+
+.pdf-export-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 185;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15,23,42,.46);
+  backdrop-filter: blur(10px);
+}
+.pdf-export-panel {
+  width: min(560px, 94vw);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 30px 90px rgba(15,23,42,.28);
+  padding: 18px;
+  color: var(--text);
+}
+.pdf-export-title {
+  font-size: 20px;
+  font-weight: 950;
+  margin-bottom: 8px;
+}
+.pdf-export-desc {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+.pdf-export-info {
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.75;
+  margin-bottom: 14px;
+}
+.pdf-export-actions {
+  display: grid;
+  gap: 10px;
+}
+.pdf-export-actions button {
+  width: 100%;
+  justify-content: center;
+}
