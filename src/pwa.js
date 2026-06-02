@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260601-2055-fencedcodefix';
+  const version = window.__APP_VERSION__ || '20260602-1430-pagesearch';
 
   function showVersion() {
     const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');

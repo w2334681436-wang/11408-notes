@@ -19,12 +19,14 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let saveTimer = null;
     let modalResolve = null;
     let htmlCenterObjectUrl = null;
+    let pageSearchState = { query: '', matches: [], index: -1 };
 
     const $ = s => document.querySelector(s);
     const els = {
       app: $('#app'), subjectList: $('#subjectList'), tree: $('#tree'), treeTitle: $('#treeTitle'),
       breadcrumb: $('#breadcrumb'), titleInput: $('#titleInput'), mdEditor: $('#mdEditor'), htmlEditor: $('#htmlEditor'),
       preview: $('#preview'), saveState: $('#saveState'), globalSearch: $('#globalSearch'), searchResults: $('#searchResults'),
+      pageSearchInput: $('#pageSearchInput'), pageSearchCount: $('#pageSearchCount'),
       sidebar: $('#sidebar'), outlineOverlay: $('#outlineOverlay'), mindmap: $('#mindmap'), outlineTitle: $('#outlineTitle'),
       modalMask: $('#modalMask'), modalTitle: $('#modalTitle'), modalInput: $('#modalInput'),
       importMask: $('#importMask'), importText: $('#importText'),
@@ -218,7 +220,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         if (htmlCode.trim()) setHtmlCenterContent(htmlCode);
         else closeHtmlCenter();
       }
-      typesetMath();
+      typesetMath().then(() => applyPageSearch({ scroll: false, preserveIndex: true }));
       updateHtmlGlobalButton();
     }
 
@@ -261,8 +263,121 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     function typesetMath() {
       if (window.MathJax?.typesetPromise) {
         window.MathJax.typesetClear?.([els.preview]);
-        window.MathJax.typesetPromise([els.preview]).catch(() => {});
+        return window.MathJax.typesetPromise([els.preview]).catch(() => {});
       }
+      return Promise.resolve();
+    }
+
+    function clearPageSearchMarks(root = els.preview) {
+      if (!root) return;
+      root.querySelectorAll('mark.page-search-mark').forEach(mark => {
+        mark.replaceWith(document.createTextNode(mark.textContent || ''));
+      });
+      root.normalize();
+    }
+
+    function updatePageSearchCount() {
+      if (!els.pageSearchCount) return;
+      const total = pageSearchState.matches.length;
+      els.pageSearchCount.textContent = total ? `${pageSearchState.index + 1}/${total}` : '0/0';
+    }
+
+    function setActivePageSearchMatch(scroll = false) {
+      pageSearchState.matches.forEach(item => item.classList.remove('active'));
+      const current = pageSearchState.matches[pageSearchState.index];
+      if (!current) { updatePageSearchCount(); return; }
+      current.classList.add('active');
+      updatePageSearchCount();
+      if (scroll) {
+        requestAnimationFrame(() => {
+          current.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+        });
+      }
+    }
+
+    function applyPageSearch(options = {}) {
+      const { scroll = false, preserveIndex = true } = options;
+      const root = els.preview;
+      if (!root) return;
+      clearPageSearchMarks(root);
+      const query = (els.pageSearchInput?.value || '').trim();
+      pageSearchState.query = query;
+      pageSearchState.matches = [];
+      if (!query) {
+        pageSearchState.index = -1;
+        updatePageSearchCount();
+        return;
+      }
+
+      const qLower = query.toLowerCase();
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const value = node.nodeValue || '';
+          if (!value.trim() || !value.toLowerCase().includes(qLower)) return NodeFilter.FILTER_REJECT;
+          const parent = node.parentElement;
+          if (!parent) return NodeFilter.FILTER_REJECT;
+          if (parent.closest('script,style,textarea,input,button,iframe,mjx-container')) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      const textNodes = [];
+      while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+      textNodes.forEach(node => {
+        const text = node.nodeValue || '';
+        const lower = text.toLowerCase();
+        const frag = document.createDocumentFragment();
+        let cursor = 0;
+        let idx = lower.indexOf(qLower, cursor);
+        while (idx !== -1) {
+          if (idx > cursor) frag.appendChild(document.createTextNode(text.slice(cursor, idx)));
+          const mark = document.createElement('mark');
+          mark.className = 'page-search-mark';
+          mark.textContent = text.slice(idx, idx + query.length);
+          frag.appendChild(mark);
+          cursor = idx + query.length;
+          idx = lower.indexOf(qLower, cursor);
+        }
+        if (cursor < text.length) frag.appendChild(document.createTextNode(text.slice(cursor)));
+        node.parentNode?.replaceChild(frag, node);
+      });
+
+      pageSearchState.matches = Array.from(root.querySelectorAll('mark.page-search-mark'));
+      if (!pageSearchState.matches.length) {
+        pageSearchState.index = -1;
+        updatePageSearchCount();
+        showToast('当前小节没有找到该关键词');
+        return;
+      }
+      if (preserveIndex && pageSearchState.index >= 0) {
+        pageSearchState.index = Math.min(pageSearchState.index, pageSearchState.matches.length - 1);
+      } else {
+        pageSearchState.index = 0;
+      }
+      setActivePageSearchMatch(scroll);
+    }
+
+    function focusKeywordInCurrentPage(query) {
+      if (!query || !els.pageSearchInput) return;
+      els.pageSearchInput.value = query;
+      pageSearchState.index = 0;
+      typesetMath().then(() => applyPageSearch({ scroll: true, preserveIndex: false }));
+    }
+
+    function goPageSearch(delta) {
+      if (!pageSearchState.matches.length) {
+        applyPageSearch({ scroll: true, preserveIndex: false });
+        return;
+      }
+      pageSearchState.index = (pageSearchState.index + delta + pageSearchState.matches.length) % pageSearchState.matches.length;
+      setActivePageSearchMatch(true);
+    }
+
+    function clearPageSearch() {
+      if (els.pageSearchInput) els.pageSearchInput.value = '';
+      clearPageSearchMarks();
+      pageSearchState = { query: '', matches: [], index: -1 };
+      updatePageSearchCount();
     }
 
     function collectNavigableNodes(subject = getActiveSubject()) {
@@ -430,7 +545,20 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       for (const subject of state.subjects) walk(subject.nodes, (node,parent,index,path) => { const content = [node.title,node.md,node.html].join('\n'); const pos = content.toLowerCase().indexOf(q.toLowerCase()); if(pos>=0){ const start=Math.max(0,pos-36), end=Math.min(content.length,pos+q.length+80); results.push({subject,node,path,snippet:content.slice(start,end)}); } });
       els.searchResults.innerHTML = results.length ? results.slice(0,50).map(r => `<div class="result-item" data-subject="${r.subject.id}" data-node="${r.node.id}"><div class="result-title">${highlight(r.node.title,q)}</div><div class="result-path">${escapeHtml(r.subject.name)} / ${r.path.map(p=>escapeHtml(p.title)).join(' / ')}</div><div class="result-snippet">${highlight(r.snippet.replace(/\n+/g,' '),q)}</div></div>`).join('') : '<div class="empty"><div><h2>没搜到</h2><p>换个关键词试试，例如“极限”“Cache”“死锁”。</p></div></div>';
       els.searchResults.classList.add('show');
-      els.searchResults.querySelectorAll('.result-item').forEach(item => item.onclick = () => { saveCurrentNode(); closeHtmlCenter(); state.activeSubjectId = item.dataset.subject; state.activeNodeId = item.dataset.node; const info = findNodeById(state.activeNodeId, getActiveSubject()); if (info) info.path.forEach(p => state.expanded[p.id] = true); els.globalSearch.value=''; els.searchResults.classList.remove('show'); renderAll(); scrollContentTop(); showToast('已跳转到搜索结果所在小节'); });
+      els.searchResults.querySelectorAll('.result-item').forEach(item => item.onclick = () => {
+        const keyword = q;
+        saveCurrentNode();
+        closeHtmlCenter();
+        state.activeSubjectId = item.dataset.subject;
+        state.activeNodeId = item.dataset.node;
+        const info = findNodeById(state.activeNodeId, getActiveSubject());
+        if (info) info.path.forEach(p => state.expanded[p.id] = true);
+        els.globalSearch.value='';
+        els.searchResults.classList.remove('show');
+        renderAll();
+        requestAnimationFrame(() => focusKeywordInCurrentPage(keyword));
+        showToast('已跳转并定位到关键词');
+      });
     }
     function highlight(text,q){ const safe=escapeHtml(text); const reg=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'ig'); return safe.replace(reg,m=>`<mark>${m}</mark>`); }
 
@@ -783,6 +911,10 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         } catch(e){ alert('导入失败：JSON 格式不正确'); }
       };
       els.titleInput.addEventListener('input', () => { onEditorInput(); renderTree(); refreshMindmapIfOpen({ center: false }); }); els.mdEditor.addEventListener('input', onEditorInput); els.htmlEditor.addEventListener('input', onEditorInput); els.globalSearch.addEventListener('input', runSearch);
+      els.pageSearchInput?.addEventListener('input', () => applyPageSearch({ scroll: true, preserveIndex: false }));
+      $('#pageSearchPrevBtn')?.addEventListener('click', () => goPageSearch(-1));
+      $('#pageSearchNextBtn')?.addEventListener('click', () => goPageSearch(1));
+      $('#pageSearchClearBtn')?.addEventListener('click', clearPageSearch);
       document.addEventListener('click', e => { if(!els.searchResults.contains(e.target) && !els.globalSearch.contains(e.target)) els.searchResults.classList.remove('show'); });
       $('#toolbar').addEventListener('click', e => { const btn=e.target.closest('button'); if(!btn) return; if(btn.dataset.md) insertAtCursor(btn.dataset.md); if(btn.dataset.wrap) insertAtCursor(btn.dataset.wrap,true); if(btn.dataset.block) insertAtCursor(btn.dataset.block); });
       $('#imageBtn').onclick = () => $('#imageInput').click();
@@ -798,6 +930,8 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       document.addEventListener('keydown', e => {
         if(e.key === 'Escape' && els.htmlCenterMask.classList.contains('show')) closeHtmlCenter();
         if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){ e.preventDefault(); saveCurrentNode(); idbSet(DATA_KEY,state); showToast('已手动保存'); }
+        if((e.ctrlKey||e.metaKey) && e.shiftKey && e.key.toLowerCase()==='f'){ e.preventDefault(); els.pageSearchInput?.focus(); return; }
+        if(e.key === 'F3'){ e.preventDefault(); goPageSearch(e.shiftKey ? -1 : 1); return; }
         if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'){ e.preventDefault(); els.globalSearch.focus(); }
       });
     }
