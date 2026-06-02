@@ -21,7 +21,7 @@
   <script>
     (function () {
       // 每次发布新版时只需要更新这里的版本号；不要每次打开都随机生成，否则 PWA/Service Worker 会反复重装并造成频闪。
-      const APP_VERSION = '20260602-1430-pagesearch';
+      const APP_VERSION = '20260602-1515-pdfexport';
       window.__APP_VERSION__ = APP_VERSION;
       document.documentElement.setAttribute('data-app-version', APP_VERSION);
       const css = document.createElement('link');
@@ -89,6 +89,7 @@
           <button class="soft" id="moveUpBtn">上移</button>
           <button class="soft" id="moveDownBtn">下移</button>
           <button class="danger" id="deleteNodeBtn">删除</button>
+          <button class="soft" id="exportPdfBtn">导出PDF</button>
           <button class="soft" id="exportBtn">导出</button>
           <button class="soft" id="importBtn">导入</button>
         </div>

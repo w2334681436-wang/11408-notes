@@ -1,4 +1,4 @@
-const APP_VERSION = '20260602-1430-pagesearch';
+const APP_VERSION = '20260602-1515-pdfexport';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_NAME = `11408-notes-cache-${SW_VERSION}`;
 
