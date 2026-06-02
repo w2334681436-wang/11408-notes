@@ -1,4 +1,4 @@
-const APP_VERSION = '20260602-1515-pdfexport';
+const APP_VERSION = '20260602-1705-removepdf';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_NAME = `11408-notes-cache-${SW_VERSION}`;
 
