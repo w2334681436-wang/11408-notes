@@ -637,3 +637,58 @@
     width: 100%;
   }
 }
+
+
+/* 页内搜索 */
+.page-searchbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255,255,255,.72);
+  backdrop-filter: blur(10px);
+  min-width: 300px;
+  max-width: 440px;
+  flex: 0 1 380px;
+}
+.page-searchbox input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 7px 8px 7px 12px;
+  color: var(--text);
+}
+.page-search-count {
+  flex: none;
+  min-width: 42px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.page-searchbox button {
+  padding: 6px 8px;
+  border-radius: 999px;
+}
+.page-search-mark {
+  background: #fde68a;
+  color: #111827;
+  border-radius: 5px;
+  padding: 0 2px;
+  box-shadow: 0 0 0 1px rgba(245,158,11,.18);
+}
+.page-search-mark.active {
+  background: #fb923c;
+  color: #111827;
+  box-shadow: 0 0 0 3px rgba(251,146,60,.28);
+}
+@media (max-width: 980px) {
+  .page-searchbox { min-width: 240px; flex: 0 0 320px; }
+}
+@media (max-width: 640px) {
+  .page-searchbox { order: 3; width: 100%; flex: 1 0 100%; max-width: none; }
+}
