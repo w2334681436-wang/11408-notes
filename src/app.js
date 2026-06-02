@@ -712,6 +712,92 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       }, { passive: false });
     }
     function toggleFullscreen(target=document.documentElement){ if(!document.fullscreenElement) target.requestFullscreen?.(); else document.exitFullscreen?.(); }
+    function exportCurrentPreviewPDF(){
+      saveCurrentNode();
+      const info = findNodeById(state.activeNodeId);
+      if (!info) { showToast('请先选择一个小节'); return; }
+
+      clearPageSearchHighlights();
+      renderPreview(info.node.md || '', info.node.html || '');
+
+      setTimeout(() => {
+        const title = (info.node.title || '未命名小节').replace(/[\\/:*?"<>|]/g, '_');
+        const pathText = getActiveSubject().name + ' / ' + info.path.map(p => p.title).join(' / ');
+        const previewHtml = els.preview.innerHTML || '<p>当前小节暂无内容</p>';
+        const appVersion = window.__APP_VERSION__ || '';
+        const printDoc = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+        displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+        processEscapes: true
+      },
+      svg: { fontCache: 'global' }
+    };
+  <\/script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"><\/script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #111827; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; line-height: 1.85; font-size: 15.5px; }
+    .pdf-page { max-width: 920px; margin: 0 auto; padding: 34px 42px 48px; }
+    .pdf-meta { color: #64748b; font-size: 12px; margin-bottom: 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; }
+    .pdf-title { font-size: 28px; line-height: 1.25; margin: 0 0 12px; font-weight: 900; color: #0f172a; }
+    h1, h2, h3, h4 { color: #0f172a; page-break-after: avoid; break-after: avoid; }
+    h1 { font-size: 28px; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; }
+    h2 { font-size: 23px; margin-top: 28px; }
+    h3 { font-size: 19px; margin-top: 22px; }
+    p { margin: 9px 0; }
+    blockquote { margin: 12px 0; padding: 10px 14px; background: #f8fafc; border-left: 4px solid #93c5fd; border-radius: 10px; color: #475569; page-break-inside: avoid; break-inside: avoid; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 7px; font-family: Consolas, "JetBrains Mono", monospace; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 14px; overflow: auto; white-space: pre-wrap; word-break: break-word; page-break-inside: avoid; break-inside: avoid; }
+    pre code { background: transparent; padding: 0; color: inherit; }
+    img { max-width: 100%; border-radius: 10px; border: 1px solid #e5e7eb; display: block; margin: 12px 0; page-break-inside: avoid; break-inside: avoid; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0; page-break-inside: avoid; break-inside: avoid; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px 10px; vertical-align: top; }
+    th { background: #f8fafc; }
+    .page-search-hit, .page-search-active { background: transparent !important; box-shadow: none !important; }
+    .math-block { overflow-x: auto; padding: 8px 0; }
+    @page { margin: 16mm 14mm; }
+    @media print {
+      body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .pdf-page { max-width: none; padding: 0; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="pdf-page">
+    <div class="pdf-meta">${escapeHtml(pathText)}${appVersion ? ' · v' + escapeHtml(appVersion) : ''} · 导出时间：${escapeHtml(new Date().toLocaleString())}</div>
+    <h1 class="pdf-title">${escapeHtml(info.node.title || '未命名小节')}</h1>
+    <article class="preview">${previewHtml}</article>
+  </main>
+  <script>
+    function doPrint(){ setTimeout(function(){ window.focus(); window.print(); }, 300); }
+    if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise().then(doPrint).catch(doPrint);
+    else doPrint();
+  <\/script>
+</body>
+</html>`;
+
+        const win = window.open('', '_blank');
+        if (!win) {
+          showToast('浏览器拦截了弹窗，请允许弹窗后再导出PDF');
+          return;
+        }
+        win.document.open();
+        win.document.write(printDoc);
+        win.document.close();
+        showToast('已打开PDF打印窗口，请选择“保存为PDF”');
+      }, 120);
+    }
+
     function exportData(){
       saveCurrentNode();
       const backup = {
@@ -864,7 +950,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#closeOutlineBtn').onclick = () => els.outlineOverlay.classList.remove('show'); $('#outlineCenterBtn').onclick = centerMindmap; $('#outlineFullBtn').onclick = () => toggleFullscreen(document.querySelector('.outline-shell'));
       $('#focusEditBtn').onclick = () => toggleFullscreen(document.querySelector('.editor-card')); $('#focusPreviewBtn').onclick = () => toggleFullscreen(document.querySelector('.preview-card'));
       document.addEventListener('fullscreenchange', setPreviewFullscreenState);
-      $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
+      $('#exportPdfBtn').onclick = exportCurrentPreviewPDF; $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
       $('#importCancel').onclick = () => els.importMask.classList.remove('show');
       $('#importFileBtn').onclick = () => $('#importFileInput').click();
       $('#importFileInput').onchange = e => {
