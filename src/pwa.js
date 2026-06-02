@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260602-1705-removepdf';
+  const version = window.__APP_VERSION__ || '20260602-1735-scrollsync';
 
   function showVersion() {
     const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');

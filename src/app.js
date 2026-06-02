@@ -20,6 +20,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let modalResolve = null;
     let htmlCenterObjectUrl = null;
     let pageSearchState = { query: '', matches: [], index: -1 };
+    let scrollSyncState = { lock: false, raf: 0 };
     let pdfRenderNodeId = null;
 
     const $ = s => document.querySelector(s);
@@ -160,7 +161,62 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       });
     }
 
-    function renderAll() { applyMode(); renderSubjects(); renderTree(); renderEditor(); runSearch(); updateHtmlGlobalButton(); }
+    function getPreviewShell() {
+      return document.querySelector('.preview-shell');
+    }
+
+    function getScrollRatio(el) {
+      if (!el) return 0;
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      return max > 1 ? Math.min(1, Math.max(0, el.scrollTop / max)) : 0;
+    }
+
+    function setScrollRatio(el, ratio) {
+      if (!el) return;
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      el.scrollTop = max > 1 ? Math.round(max * Math.min(1, Math.max(0, ratio))) : 0;
+    }
+
+    function isScrollSyncActive() {
+      return state.uiMode === 'edit' && els.mdEditor && !els.mdEditor.disabled && !!getPreviewShell();
+    }
+
+    function syncScrollFrom(source) {
+      if (!isScrollSyncActive() || scrollSyncState.lock) return;
+      const previewShell = getPreviewShell();
+      const from = source === 'preview' ? previewShell : els.mdEditor;
+      const to = source === 'preview' ? els.mdEditor : previewShell;
+      const ratio = getScrollRatio(from);
+      cancelAnimationFrame(scrollSyncState.raf);
+      scrollSyncState.raf = requestAnimationFrame(() => {
+        scrollSyncState.lock = true;
+        setScrollRatio(to, ratio);
+        requestAnimationFrame(() => { scrollSyncState.lock = false; });
+      });
+    }
+
+    function syncPreviewToEditorPosition() {
+      if (!isScrollSyncActive()) return;
+      const ratio = getScrollRatio(els.mdEditor);
+      requestAnimationFrame(() => {
+        setScrollRatio(getPreviewShell(), ratio);
+        setTimeout(() => setScrollRatio(getPreviewShell(), ratio), 180);
+      });
+    }
+
+    function bindScrollSync() {
+      if (els.mdEditor && !els.mdEditor.dataset.scrollSyncBound) {
+        els.mdEditor.dataset.scrollSyncBound = '1';
+        els.mdEditor.addEventListener('scroll', () => syncScrollFrom('editor'), { passive: true });
+      }
+      const previewShell = getPreviewShell();
+      if (previewShell && !previewShell.dataset.scrollSyncBound) {
+        previewShell.dataset.scrollSyncBound = '1';
+        previewShell.addEventListener('scroll', () => syncScrollFrom('preview'), { passive: true });
+      }
+    }
+
+    function renderAll() { applyMode(); renderSubjects(); renderTree(); renderEditor(); bindScrollSync(); runSearch(); updateHtmlGlobalButton(); }
 
     function renderSubjects() {
       els.subjectList.innerHTML = '';
@@ -209,6 +265,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       els.breadcrumb.textContent = getActiveSubject().name + ' / ' + path.map(p => p.title).join(' / ');
       els.titleInput.value = node.title; els.mdEditor.value = node.md || ''; els.htmlEditor.value = node.html || '';
       renderPreview(node.md || '', node.html || '');
+      bindScrollSync();
       updatePrevNextState();
     }
 
@@ -473,7 +530,18 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       else if (text.includes('|')) { insert = text.replace('|', selected); cursor = start + text.indexOf('|') + selected.length; }
       ta.value = ta.value.slice(0, start) + insert + ta.value.slice(end); ta.focus(); ta.selectionStart = ta.selectionEnd = cursor; onEditorInput();
     }
-    function onEditorInput() { saveCurrentNode(); const info = findNodeById(state.activeNodeId); renderPreview(info?.node.md || els.mdEditor.value, info?.node.html || els.htmlEditor.value); renderTree(); scheduleSave(); }
+    function onEditorInput() {
+      const editorRatio = getScrollRatio(els.mdEditor);
+      saveCurrentNode();
+      const info = findNodeById(state.activeNodeId);
+      renderPreview(info?.node.md || els.mdEditor.value, info?.node.html || els.htmlEditor.value);
+      if (state.uiMode === 'edit') {
+        requestAnimationFrame(() => setScrollRatio(getPreviewShell(), editorRatio));
+        setTimeout(() => setScrollRatio(getPreviewShell(), editorRatio), 180);
+      }
+      renderTree();
+      scheduleSave();
+    }
 
     function mdToHtml(md) {
       if (!md.trim()) return '<div class="empty"><div><h2>开始写这一小节</h2><p>点击顶部“编辑”进入双栏编辑；默认页面只优先显示渲染结果。</p></div></div>';
@@ -1065,7 +1133,8 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
 
     function bindEvents() {
       bindMindmapPan();
-      $('#modeToggleBtn').onclick = () => { saveCurrentNode(); state.uiMode = state.uiMode === 'preview' ? 'edit' : 'preview'; applyMode(); renderEditor(); scheduleSave(); };
+      bindScrollSync();
+      $('#modeToggleBtn').onclick = () => { saveCurrentNode(); state.uiMode = state.uiMode === 'preview' ? 'edit' : 'preview'; applyMode(); renderEditor(); bindScrollSync(); if (state.uiMode === 'edit') syncPreviewToEditorPosition(); scheduleSave(); };
       $('#mobileMenuBtn').onclick = () => els.sidebar.classList.toggle('show');
       $('#htmlGlobalBtn').onclick = openHtmlCenter;
       $('#htmlCenterCloseBtn').onclick = closeHtmlCenter;
