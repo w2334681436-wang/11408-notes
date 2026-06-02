@@ -1082,7 +1082,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#closeOutlineBtn').onclick = () => els.outlineOverlay.classList.remove('show'); $('#outlineCenterBtn').onclick = centerMindmap; $('#outlineFullBtn').onclick = () => toggleFullscreen(document.querySelector('.outline-shell'));
       $('#focusEditBtn').onclick = () => toggleFullscreen(document.querySelector('.editor-card')); $('#focusPreviewBtn').onclick = () => toggleFullscreen(document.querySelector('.preview-card'));
       document.addEventListener('fullscreenchange', setPreviewFullscreenState);
-      $('#exportPdfBtn').onclick = openPdfExportDialog; $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
+      $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
       $('#importCancel').onclick = () => els.importMask.classList.remove('show');
       $('#importFileBtn').onclick = () => $('#importFileInput').click();
       $('#importFileInput').onchange = e => {

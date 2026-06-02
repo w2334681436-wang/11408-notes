@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260602-1620-pdfscopefix';
+  const version = window.__APP_VERSION__ || '20260602-1705-removepdf';
 
   function showVersion() {
     const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');
