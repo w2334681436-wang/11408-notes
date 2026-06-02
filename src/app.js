@@ -20,6 +20,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let modalResolve = null;
     let htmlCenterObjectUrl = null;
     let pageSearchState = { query: '', matches: [], index: -1 };
+    let pdfRenderNodeId = null;
 
     const $ = s => document.querySelector(s);
     const els = {
@@ -506,12 +507,12 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         .replace(/^###### (.*)$/gm, '<h6>$1</h6>').replace(/^##### (.*)$/gm, '<h5>$1</h5>').replace(/^#### (.*)$/gm, '<h4>$1</h4>').replace(/^### (.*)$/gm, '<h3>$1</h3>').replace(/^## (.*)$/gm, '<h2>$1</h2>').replace(/^# (.*)$/gm, '<h1>$1</h1>')
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>')
         .replace(/\[\[图片:([^\]]+)\]\]/g, (full, id) => {
-          const info = findNodeById(state.activeNodeId);
+          const info = findNodeById(pdfRenderNodeId || state.activeNodeId);
           const asset = info ? getImageAsset(info.node, id) : null;
           return asset?.src ? `<img alt="${escapeAttr(asset.name || '图片')}" src="${escapeAttr(asset.src)}" />` : '<span style="color:#ef4444">[图片丢失]</span>';
         })
         .replace(/!\[([^\]]*)\]\(asset:([^)]+)\)/g, (full, alt, id) => {
-          const info = findNodeById(state.activeNodeId);
+          const info = findNodeById(pdfRenderNodeId || state.activeNodeId);
           const asset = info ? getImageAsset(info.node, id) : null;
           return asset?.src ? `<img alt="${escapeAttr(alt || asset.name || '图片')}" src="${escapeAttr(asset.src)}" />` : '<span style="color:#ef4444">[图片丢失]</span>';
         })
@@ -712,20 +713,158 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       }, { passive: false });
     }
     function toggleFullscreen(target=document.documentElement){ if(!document.fullscreenElement) target.requestFullscreen?.(); else document.exitFullscreen?.(); }
-    function exportCurrentPreviewPDF(){
+    function openPdfExportDialog(){
       saveCurrentNode();
       const info = findNodeById(state.activeNodeId);
       if (!info) { showToast('请先选择一个小节'); return; }
 
-      clearPageSearchHighlights();
-      renderPreview(info.node.md || '', info.node.html || '');
+      const old = document.getElementById('pdfExportMask');
+      if (old) old.remove();
 
-      setTimeout(() => {
-        const title = (info.node.title || '未命名小节').replace(/[\\/:*?"<>|]/g, '_');
-        const pathText = getActiveSubject().name + ' / ' + info.path.map(p => p.title).join(' / ');
-        const previewHtml = els.preview.innerHTML || '<p>当前小节暂无内容</p>';
-        const appVersion = window.__APP_VERSION__ || '';
-        const printDoc = `<!doctype html>
+      const chapter = getChapterInfoForNode(info);
+      const sectionHasContent = hasExportableMarkdown(info.node);
+      const chapterItems = chapter ? collectChapterExportItems(chapter.node) : [];
+
+      const mask = document.createElement('div');
+      mask.id = 'pdfExportMask';
+      mask.className = 'pdf-export-mask';
+      mask.innerHTML = `
+        <div class="pdf-export-panel" role="dialog" aria-modal="true">
+          <div class="pdf-export-title">导出 PDF</div>
+          <div class="pdf-export-desc">
+            请选择导出范围。空白小节不会生成 PDF，也不会拼接进章节 PDF。保存时浏览器会按文档标题建议文件名。
+          </div>
+          <div class="pdf-export-info">
+            <div><b>当前小节：</b>${escapeHtml(info.node.title || '未命名小节')}</div>
+            <div><b>当前章节：</b>${escapeHtml(chapter?.node?.title || '未命名章节')}</div>
+            <div><b>章节可导出小节数：</b>${chapterItems.length}</div>
+          </div>
+          <div class="pdf-export-actions">
+            <button class="primary" id="pdfExportSectionBtn" ${sectionHasContent ? '' : 'disabled'}>导出当前小节 PDF</button>
+            <button class="soft" id="pdfExportChapterBtn" ${chapterItems.length ? '' : 'disabled'}>导出当前章节 PDF</button>
+            <button id="pdfExportCancelBtn">取消</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(mask);
+
+      const close = () => mask.remove();
+      mask.addEventListener('click', e => { if (e.target === mask) close(); });
+      mask.querySelector('#pdfExportCancelBtn').onclick = close;
+      mask.querySelector('#pdfExportSectionBtn').onclick = () => {
+        exportPdfByScope('section');
+        close();
+      };
+      mask.querySelector('#pdfExportChapterBtn').onclick = () => {
+        exportPdfByScope('chapter');
+        close();
+      };
+    }
+
+    function hasExportableMarkdown(node){
+      return !!(node && typeof node.md === 'string' && node.md.trim().length > 0);
+    }
+
+    function getChapterInfoForNode(info){
+      if (!info || !info.path || !info.path.length) return null;
+      const chapterNode = info.path[0];
+      const subject = getActiveSubject();
+      const index = subject?.nodes?.findIndex(n => n.id === chapterNode.id) ?? -1;
+      return { node: chapterNode, parent: null, index, path: [chapterNode] };
+    }
+
+    function collectChapterExportItems(chapterNode){
+      const items = [];
+      const visit = (node, path) => {
+        if (hasExportableMarkdown(node)) items.push({ node, path });
+        if (node.children?.length) node.children.forEach(child => visit(child, path.concat(child)));
+      };
+      if (chapterNode) visit(chapterNode, [chapterNode]);
+      return items;
+    }
+
+    function mdToHtmlForPdfNode(node){
+      const old = pdfRenderNodeId;
+      pdfRenderNodeId = node?.id || null;
+      try {
+        return mdToHtml(node?.md || '');
+      } finally {
+        pdfRenderNodeId = old;
+      }
+    }
+
+    function exportPdfByScope(scope){
+      saveCurrentNode();
+      clearPageSearchHighlights();
+
+      const info = findNodeById(state.activeNodeId);
+      if (!info) { showToast('请先选择一个小节'); return; }
+
+      const chapter = getChapterInfoForNode(info);
+      const subjectName = getActiveSubject()?.name || '';
+      let title = '';
+      let pathText = '';
+      let bodyHtml = '';
+      let itemCount = 0;
+
+      if (scope === 'chapter') {
+        const items = chapter ? collectChapterExportItems(chapter.node) : [];
+        if (!items.length) { showToast('当前章节没有可导出的非空小节'); return; }
+        title = sanitizeFileName(chapter.node.title || '未命名章节');
+        pathText = subjectName + ' / ' + (chapter.node.title || '未命名章节');
+        itemCount = items.length;
+        bodyHtml = items.map((item, idx) => {
+          const depth = Math.min(4, Math.max(2, item.path.length + 1));
+          const headingTag = 'h' + depth;
+          const itemPath = item.path.map(p => p.title).join(' / ');
+          return `
+            <section class="pdf-section ${idx ? 'pdf-section-break' : ''}">
+              <div class="pdf-section-path">${escapeHtml(subjectName + ' / ' + itemPath)}</div>
+              <${headingTag} class="pdf-section-title">${escapeHtml(item.node.title || '未命名小节')}</${headingTag}>
+              <article class="preview">${mdToHtmlForPdfNode(item.node)}</article>
+            </section>
+          `;
+        }).join('\n');
+      } else {
+        if (!hasExportableMarkdown(info.node)) { showToast('当前小节内容为空，未生成PDF'); return; }
+        title = sanitizeFileName(info.node.title || '未命名小节');
+        pathText = subjectName + ' / ' + info.path.map(p => p.title).join(' / ');
+        itemCount = 1;
+        bodyHtml = `
+          <section class="pdf-section">
+            <article class="preview">${mdToHtmlForPdfNode(info.node)}</article>
+          </section>
+        `;
+      }
+
+      const win = window.open('', '_blank');
+      if (!win) {
+        showToast('浏览器拦截了弹窗，请允许弹窗后再导出PDF');
+        return;
+      }
+
+      const printDoc = buildPdfPrintDoc({
+        title,
+        pathText,
+        bodyHtml,
+        heading: scope === 'chapter' ? (chapter?.node?.title || '未命名章节') : (info.node.title || '未命名小节'),
+        itemCount,
+        scope
+      });
+
+      win.document.open();
+      win.document.write(printDoc);
+      win.document.close();
+      showToast(scope === 'chapter' ? '已打开章节PDF窗口，请保存为PDF' : '已打开小节PDF窗口，请保存为PDF');
+    }
+
+    function sanitizeFileName(name){
+      return String(name || '未命名').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || '未命名';
+    }
+
+    function buildPdfPrintDoc({ title, pathText, bodyHtml, heading, itemCount, scope }){
+      const appVersion = window.__APP_VERSION__ || '';
+      return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -748,7 +887,10 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; line-height: 1.85; font-size: 15.5px; }
     .pdf-page { max-width: 920px; margin: 0 auto; padding: 34px 42px 48px; }
     .pdf-meta { color: #64748b; font-size: 12px; margin-bottom: 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; }
-    .pdf-title { font-size: 28px; line-height: 1.25; margin: 0 0 12px; font-weight: 900; color: #0f172a; }
+    .pdf-title { font-size: 30px; line-height: 1.25; margin: 0 0 18px; font-weight: 900; color: #0f172a; }
+    .pdf-section-path { color: #64748b; font-size: 12px; margin: 0 0 8px; }
+    .pdf-section-title { margin-top: 0; }
+    .pdf-section-break { page-break-before: always; break-before: page; }
     h1, h2, h3, h4 { color: #0f172a; page-break-after: avoid; break-after: avoid; }
     h1 { font-size: 28px; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; }
     h2 { font-size: 23px; margin-top: 28px; }
@@ -762,7 +904,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     table { border-collapse: collapse; width: 100%; margin: 12px 0; page-break-inside: avoid; break-inside: avoid; }
     th, td { border: 1px solid #e5e7eb; padding: 8px 10px; vertical-align: top; }
     th { background: #f8fafc; }
-    .page-search-hit, .page-search-active { background: transparent !important; box-shadow: none !important; }
+    .page-search-mark, .page-search-mark.active { background: transparent !important; box-shadow: none !important; }
     .math-block { overflow-x: auto; padding: 8px 0; }
     @page { margin: 16mm 14mm; }
     @media print {
@@ -774,28 +916,18 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
 </head>
 <body>
   <main class="pdf-page">
-    <div class="pdf-meta">${escapeHtml(pathText)}${appVersion ? ' · v' + escapeHtml(appVersion) : ''} · 导出时间：${escapeHtml(new Date().toLocaleString())}</div>
-    <h1 class="pdf-title">${escapeHtml(info.node.title || '未命名小节')}</h1>
-    <article class="preview">${previewHtml}</article>
+    <div class="pdf-meta">${escapeHtml(pathText)}${appVersion ? ' · v' + escapeHtml(appVersion) : ''} · ${scope === 'chapter' ? '章节PDF' : '小节PDF'} · ${itemCount}个小节 · 导出时间：${escapeHtml(new Date().toLocaleString())}</div>
+    <h1 class="pdf-title">${escapeHtml(heading || title)}</h1>
+    ${bodyHtml}
   </main>
   <script>
-    function doPrint(){ setTimeout(function(){ window.focus(); window.print(); }, 300); }
+    document.title = ${JSON.stringify(title)};
+    function doPrint(){ setTimeout(function(){ window.focus(); window.print(); }, 450); }
     if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise().then(doPrint).catch(doPrint);
     else doPrint();
   <\/script>
 </body>
 </html>`;
-
-        const win = window.open('', '_blank');
-        if (!win) {
-          showToast('浏览器拦截了弹窗，请允许弹窗后再导出PDF');
-          return;
-        }
-        win.document.open();
-        win.document.write(printDoc);
-        win.document.close();
-        showToast('已打开PDF打印窗口，请选择“保存为PDF”');
-      }, 120);
     }
 
     function exportData(){
@@ -950,7 +1082,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#closeOutlineBtn').onclick = () => els.outlineOverlay.classList.remove('show'); $('#outlineCenterBtn').onclick = centerMindmap; $('#outlineFullBtn').onclick = () => toggleFullscreen(document.querySelector('.outline-shell'));
       $('#focusEditBtn').onclick = () => toggleFullscreen(document.querySelector('.editor-card')); $('#focusPreviewBtn').onclick = () => toggleFullscreen(document.querySelector('.preview-card'));
       document.addEventListener('fullscreenchange', setPreviewFullscreenState);
-      $('#exportPdfBtn').onclick = exportCurrentPreviewPDF; $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
+      $('#exportPdfBtn').onclick = openPdfExportDialog; $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
       $('#importCancel').onclick = () => els.importMask.classList.remove('show');
       $('#importFileBtn').onclick = () => $('#importFileInput').click();
       $('#importFileInput').onchange = e => {
