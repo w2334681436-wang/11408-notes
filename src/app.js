@@ -20,6 +20,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let modalResolve = null;
     let htmlCenterObjectUrl = null;
     let pageSearchState = { query: '', matches: [], index: -1 };
+    let pageTocState = { collapsed: true, headings: [], activeId: '' };
     let scrollSyncState = { lock: false, raf: 0 };
     let pdfRenderNodeId = null;
 
@@ -259,7 +260,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       ['addSiblingBtn','addChildBtn','deleteNodeBtn','moveUpBtn','moveDownBtn','prevBtn','nextBtn'].forEach(id => $('#' + id).disabled = !hasNode);
       if (!hasNode) {
         els.breadcrumb.textContent = '请选择或创建一个小节'; els.titleInput.value = ''; els.mdEditor.value = ''; els.htmlEditor.value = '';
-        els.preview.innerHTML = '<div class="empty"><div><h2>还没有选择小节</h2><p>从左侧目录选择，或点击“+章”创建。</p></div></div>'; updateHtmlGlobalButton(); return;
+        els.preview.innerHTML = '<div class="empty"><div><h2>还没有选择小节</h2><p>从左侧目录选择，或点击“+章”创建。</p></div></div>'; renderPageToc(); updateHtmlGlobalButton(); return;
       }
       const { node, path } = info;
       els.breadcrumb.textContent = getActiveSubject().name + ' / ' + path.map(p => p.title).join(' / ');
@@ -272,14 +273,138 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     function renderPreview(md, html) {
       const base = mdToHtml(md || '');
       els.preview.innerHTML = base;
+      renderPageToc();
       if (els.htmlCenterMask?.classList.contains('show')) {
         const info = findNodeById(state.activeNodeId);
         const htmlCode = info?.node?.html || html || '';
         if (htmlCode.trim()) setHtmlCenterContent(htmlCode);
         else closeHtmlCenter();
       }
-      typesetMath().then(() => applyPageSearch({ scroll: false, preserveIndex: true }));
+      typesetMath().then(() => { refreshPageTocActive(); applyPageSearch({ scroll: false, preserveIndex: true }); });
       updateHtmlGlobalButton();
+    }
+
+
+    function getPreviewShell() {
+      return document.querySelector('.preview-shell');
+    }
+
+    function slugifyHeadingText(text, index) {
+      const base = String(text || '')
+        .trim()
+        .replace(/\s+/g, '-')
+        .replace(/[<>"'`]/g, '')
+        .slice(0, 40);
+      return 'toc-' + (base || 'heading') + '-' + index;
+    }
+
+    function ensurePageTocPanel() {
+      const card = document.querySelector('.preview-card');
+      if (!card) return null;
+      let panel = document.getElementById('pageTocPanel');
+      if (panel) return panel;
+      panel = document.createElement('aside');
+      panel.id = 'pageTocPanel';
+      panel.className = 'page-toc-panel collapsed';
+      panel.innerHTML = `
+        <button class="page-toc-toggle" id="pageTocToggle" type="button">目录</button>
+        <div class="page-toc-body">
+          <div class="page-toc-head">
+            <strong>本页目录</strong>
+            <button class="small ghost" id="pageTocCollapseBtn" type="button">收起</button>
+          </div>
+          <div class="page-toc-list" id="pageTocList"></div>
+        </div>
+      `;
+      card.appendChild(panel);
+      panel.querySelector('#pageTocToggle').addEventListener('click', () => {
+        pageTocState.collapsed = !pageTocState.collapsed;
+        panel.classList.toggle('collapsed', pageTocState.collapsed);
+      });
+      panel.querySelector('#pageTocCollapseBtn').addEventListener('click', () => {
+        pageTocState.collapsed = true;
+        panel.classList.add('collapsed');
+      });
+      const shell = getPreviewShell();
+      if (shell && !shell.dataset.tocScrollBound) {
+        shell.dataset.tocScrollBound = '1';
+        shell.addEventListener('scroll', () => refreshPageTocActive(), { passive: true });
+      }
+      return panel;
+    }
+
+    function removePageTocPanel() {
+      document.getElementById('pageTocPanel')?.remove();
+      pageTocState.headings = [];
+      pageTocState.activeId = '';
+    }
+
+    function scrollPreviewToHeading(id) {
+      const shell = getPreviewShell();
+      const heading = document.getElementById(id);
+      if (!shell || !heading) return;
+      const shellRect = shell.getBoundingClientRect();
+      const headingRect = heading.getBoundingClientRect();
+      const delta = headingRect.top - shellRect.top - 24;
+      shell.scrollTo({ top: shell.scrollTop + delta, behavior: 'smooth' });
+      setTimeout(() => refreshPageTocActive(id), 120);
+    }
+
+    function refreshPageTocActive(forceId = '') {
+      const panel = document.getElementById('pageTocPanel');
+      const shell = getPreviewShell();
+      if (!panel || !shell || !pageTocState.headings.length) return;
+      let activeId = forceId;
+      if (!activeId) {
+        const shellTop = shell.getBoundingClientRect().top;
+        let best = pageTocState.headings[0];
+        for (const item of pageTocState.headings) {
+          const el = document.getElementById(item.id);
+          if (!el) continue;
+          const top = el.getBoundingClientRect().top - shellTop;
+          if (top <= 80) best = item;
+          else break;
+        }
+        activeId = best?.id || '';
+      }
+      if (activeId === pageTocState.activeId) return;
+      pageTocState.activeId = activeId;
+      panel.querySelectorAll('.page-toc-item').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.target === activeId);
+      });
+    }
+
+    function renderPageToc() {
+      if (!els.preview) return;
+      const headings = Array.from(els.preview.querySelectorAll('h1,h2,h3,h4,h5,h6'))
+        .filter(h => h.textContent && h.textContent.trim());
+      if (!headings.length) {
+        removePageTocPanel();
+        return;
+      }
+      const panel = ensurePageTocPanel();
+      const list = panel?.querySelector('#pageTocList');
+      if (!panel || !list) return;
+      const used = new Set();
+      pageTocState.headings = headings.map((h, index) => {
+        const level = Number(h.tagName.slice(1));
+        let id = h.id || slugifyHeadingText(h.textContent, index + 1);
+        while (used.has(id)) id = id + '-' + (index + 1);
+        used.add(id);
+        h.id = id;
+        h.classList.add('toc-heading-anchor');
+        return { id, level, text: h.textContent.trim() };
+      });
+      list.innerHTML = pageTocState.headings.map(item => `
+        <button class="page-toc-item toc-level-${Math.min(item.level, 6)}" data-target="${escapeAttr(item.id)}" type="button" title="${escapeAttr(item.text)}">
+          <span>${escapeHtml(item.text)}</span>
+        </button>
+      `).join('');
+      list.querySelectorAll('.page-toc-item').forEach(btn => {
+        btn.addEventListener('click', () => scrollPreviewToHeading(btn.dataset.target));
+      });
+      panel.classList.toggle('collapsed', pageTocState.collapsed);
+      requestAnimationFrame(() => refreshPageTocActive());
     }
 
     function setHtmlCenterContent(htmlCode) {

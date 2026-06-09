@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260602-1735-scrollsync';
+  const version = window.__APP_VERSION__ || '20260609-0145-pagetoc';
 
   function showVersion() {
     const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');
