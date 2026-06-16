@@ -1,12 +1,8 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260609-0145-pagetoc';
+  const version = window.__APP_VERSION__ || '20260616-1930-aiexport';
 
   function showVersion() {
-    const el = document.getElementById('appVersionText') || document.querySelector('.brand-sub');
-    if (el && !el.dataset.versionInjected) {
-      el.dataset.versionInjected = '1';
-      el.textContent = `${el.textContent} · v${version}`;
-    }
+    // 顶部副标题已按用户要求隐藏；版本号只保留在 window.__APP_VERSION__ 和缓存参数中。
   }
 
   showVersion();

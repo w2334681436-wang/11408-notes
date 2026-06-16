@@ -1136,11 +1136,117 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       openExportDownloadPanel(filename, text, true);
     }
 
-    function openExportDownloadPanel(filename, text, autoDownload = false) {
+
+    function buildAiKnowledgeText(){
+      saveCurrentNode();
+      const lines = [];
+      const version = window.__APP_VERSION__ || '';
+      const exportedAt = new Date().toLocaleString();
+      const isoTime = new Date().toISOString();
+      lines.push('# 11408 笔记 AI 知识库导出');
+      lines.push('');
+      lines.push(`- 导出时间：${exportedAt}`);
+      if (version) lines.push(`- 应用版本：${version}`);
+      lines.push('- 用途：把这个文件发给 AI，用于基于你的全部笔记内容进行问答、总结、查漏补缺。');
+      lines.push('- 范围：全部科目、章节、节、子节的 Markdown 正文和 HTML 代码。');
+      lines.push('- 说明：图片短标签会保留为 `[[图片:img_xxx]]`，并列出图片资源名称；为避免 base64 噪声影响 AI 问答，本 AI 导出文件不内嵌图片原始 base64。需要完整原图备份请使用原来的“导出”JSON备份。');
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+
+      function makeFence(text, lang='text'){
+        let fence = '~~~';
+        const body = String(text || '');
+        while (body.includes(fence)) fence += '~';
+        return `${fence}${lang}\n${body}\n${fence}`;
+      }
+
+      function nodeHasContent(node){
+        return !!String(node?.md || '').trim() || !!String(node?.html || '').trim() || !!(node?.assets && node.assets.length);
+      }
+
+      let totalNodes = 0;
+      let contentNodes = 0;
+      let totalAssets = 0;
+      for (const subject of state.subjects || []) {
+        lines.push(`# 科目：${subject.name || subject.id || '未命名科目'}`);
+        lines.push('');
+        const nodes = subject.nodes || [];
+        if (!nodes.length) {
+          lines.push('> 该科目暂无笔记节点。');
+          lines.push('');
+          continue;
+        }
+        walk(nodes, (node, parent, index, path) => {
+          totalNodes++;
+          if (nodeHasContent(node)) contentNodes++;
+          const depth = Math.min(5, Math.max(1, path.length));
+          const headingLevel = '#'.repeat(Math.min(6, depth + 1));
+          const titlePath = path.map(p => p.title || '未命名').join(' / ');
+          const prefix = path.map((_, i) => i + 1).join('.');
+          lines.push(`${headingLevel} ${prefix} ${node.title || '未命名'}`);
+          lines.push('');
+          lines.push(`> 路径：${subject.name || subject.id || '未命名科目'} / ${titlePath}`);
+          lines.push(`> 节点ID：${node.id || ''}`);
+          lines.push('');
+
+          const md = String(node.md || '').trim();
+          const html = String(node.html || '').trim();
+          const assets = Array.isArray(node.assets) ? node.assets : [];
+          totalAssets += assets.length;
+
+          if (md) {
+            lines.push('**Markdown 正文：**');
+            lines.push('');
+            lines.push(md);
+            lines.push('');
+          }
+          if (html) {
+            lines.push('**HTML 代码：**');
+            lines.push('');
+            lines.push(makeFence(html, 'html'));
+            lines.push('');
+          }
+          if (assets.length) {
+            lines.push('**图片/资源清单：**');
+            lines.push('');
+            for (const asset of assets) {
+              const name = asset?.name || '未命名图片';
+              const type = asset?.type || 'image';
+              const srcLen = asset?.src ? String(asset.src).length : 0;
+              lines.push(`- ${asset?.id || 'unknown'}｜${name}｜${type}｜数据长度：${srcLen}`);
+            }
+            lines.push('');
+          }
+          if (!md && !html && !assets.length) {
+            lines.push('> 当前节点暂无正文内容。');
+            lines.push('');
+          }
+          lines.push('---');
+          lines.push('');
+        });
+      }
+
+      lines.splice(8, 0, `- 节点总数：${totalNodes}，含内容节点：${contentNodes}，图片资源数：${totalAssets}`);
+      lines.push('');
+      lines.push(`<!-- AI_EXPORT_GENERATED_AT: ${isoTime} -->`);
+      return lines.join('\n');
+    }
+
+    function exportAiKnowledge(){
+      const text = buildAiKnowledgeText();
+      const date = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const filename = '11408-notes-ai-knowledge-' + date + '.md';
+      openExportDownloadPanel(filename, text, true, { kind: 'AI笔记知识库', mime: 'text/markdown;charset=utf-8' });
+    }
+
+    function openExportDownloadPanel(filename, text, autoDownload = false, options = {}) {
       const oldPanel = document.getElementById('exportDownloadMask');
       if (oldPanel) oldPanel.remove();
 
-      const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+      const kind = options.kind || (String(filename).endsWith('.json') ? 'JSON备份' : '导出文件');
+      const mime = options.mime || (String(filename).endsWith('.md') ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8');
+      const blob = new Blob([text], { type: mime });
       const url = URL.createObjectURL(blob);
 
       const mask = document.createElement('div');
@@ -1151,19 +1257,19 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       panel.style.cssText = 'width:min(520px,94vw);background:#fff;border:1px solid #e5e7eb;border-radius:22px;box-shadow:0 30px 90px rgba(15,23,42,.28);padding:18px;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Arial,sans-serif;';
 
       panel.innerHTML = `
-        <div style="font-size:18px;font-weight:900;margin-bottom:6px;">备份文件已生成</div>
+        <div style="font-size:18px;font-weight:900;margin-bottom:6px;">${kind}已生成</div>
         <div style="font-size:13px;line-height:1.7;color:#64748b;margin-bottom:14px;">
-          如果浏览器没有自动下载，请点下面的“下载JSON备份”。手机浏览器有时会把文件保存到“下载/文件”App里。
+          如果浏览器没有自动下载，请点下面的下载按钮。手机浏览器有时会把文件保存到“下载/文件”App里。
         </div>
         <a id="exportRealDownloadLink"
            download="${escapeAttr(filename)}"
            href="${url}"
            style="display:block;text-align:center;text-decoration:none;background:#2563eb;color:#fff;border-radius:14px;padding:12px 14px;font-weight:900;margin-bottom:10px;">
-          下载JSON备份
+          下载${kind}
         </a>
         <button id="exportCopyBackupBtn"
                 style="width:100%;border:0;border-radius:14px;padding:11px 14px;background:#eff6ff;color:#2563eb;font-weight:800;margin-bottom:10px;">
-          复制JSON文本到剪贴板
+          复制${kind}文本到剪贴板
         </button>
         <button id="exportCloseBtn"
                 style="width:100%;border:0;border-radius:14px;padding:10px 14px;background:#f8fafc;color:#172033;">
@@ -1186,7 +1292,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       panel.querySelector('#exportCopyBackupBtn').onclick = async () => {
         try {
           await navigator.clipboard.writeText(text);
-          showToast('已复制JSON文本');
+          showToast('已复制' + kind + '文本');
         } catch (err) {
           const ta = document.createElement('textarea');
           ta.value = text;
@@ -1196,9 +1302,9 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
           ta.select();
           try {
             document.execCommand('copy');
-            showToast('已复制JSON文本');
+            showToast('已复制' + kind + '文本');
           } catch (copyErr) {
-            alert('复制失败，请使用“下载JSON备份”按钮。');
+            alert('复制失败，请使用“下载${kind}”按钮。');
           }
           ta.remove();
         }
@@ -1276,6 +1382,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#closeOutlineBtn').onclick = () => els.outlineOverlay.classList.remove('show'); $('#outlineCenterBtn').onclick = centerMindmap; $('#outlineFullBtn').onclick = () => toggleFullscreen(document.querySelector('.outline-shell'));
       $('#focusEditBtn').onclick = () => toggleFullscreen(document.querySelector('.editor-card')); $('#focusPreviewBtn').onclick = () => toggleFullscreen(document.querySelector('.preview-card'));
       document.addEventListener('fullscreenchange', setPreviewFullscreenState);
+      $('#exportAiBtn').onclick = exportAiKnowledge;
       $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
       $('#importCancel').onclick = () => els.importMask.classList.remove('show');
       $('#importFileBtn').onclick = () => $('#importFileInput').click();
