@@ -75,7 +75,7 @@
       box-shadow: 0 12px 24px rgba(37,99,235,.25);
     }
     .brand-title { font-size: 18px; font-weight: 900; letter-spacing: -.3px; }
-    .brand-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .brand-sub { display: none !important; }
     .top-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .searchbox { position: relative; min-width: 280px; max-width: 560px; flex: 1; }
     .searchbox input {
