@@ -1,4 +1,4 @@
-const APP_VERSION = '20260609-0145-pagetoc';
+const APP_VERSION = '20260616-1930-aiexport';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_NAME = `11408-notes-cache-${SW_VERSION}`;
 
