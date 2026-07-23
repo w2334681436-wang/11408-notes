@@ -1,6 +1,9 @@
 const DB_NAME = 'kaoyan11408_notes_db_v2';
     const STORE_NAME = 'kv';
     const DATA_KEY = 'notes-data';
+    const SECTION_PACKAGE_APP = '11408-notes-section-package';
+    const SECTION_PACKAGE_VERSION = 1;
+    const MAX_SECTION_PACKAGE_BYTES = 100 * 1024 * 1024;
     const SUBJECTS = [
       { id: 'gaoshu', name: '高数', short: '高' },
       { id: 'xiandai', name: '线代', short: '线' },
@@ -107,6 +110,153 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         const id = addImageAsset(node, alt || '图片', src);
         return `[[图片:${id}]]`;
       });
+    }
+
+    function parseSectionPackage(raw) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('文件内容不是有效对象');
+      if (raw.app !== SECTION_PACKAGE_APP) throw new Error('这不是 11408 小节包');
+      if (Number(raw.version) !== SECTION_PACKAGE_VERSION) throw new Error(`暂不支持该小节包版本：${raw.version ?? '未知'}`);
+
+      const section = raw.section;
+      if (!section || typeof section !== 'object' || Array.isArray(section)) throw new Error('小节包缺少 section 数据');
+      if (typeof section.md !== 'string') throw new Error('小节包缺少 Markdown 正文');
+      if (section.html != null && typeof section.html !== 'string') throw new Error('HTML 内容格式不正确');
+      if (section.title != null && typeof section.title !== 'string') throw new Error('小节标题格式不正确');
+      if (section.assets != null && !Array.isArray(section.assets)) throw new Error('图片资源格式不正确');
+
+      const seenIds = new Set();
+      const assets = (section.assets || []).map((asset, index) => {
+        if (!asset || typeof asset !== 'object' || Array.isArray(asset)) throw new Error(`第 ${index + 1} 个图片资源格式不正确`);
+        const id = String(asset.id || '').trim();
+        const src = String(asset.src || '');
+        if (!id) throw new Error(`第 ${index + 1} 个图片缺少资源 ID`);
+        if (seenIds.has(id)) throw new Error(`图片资源 ID 重复：${id}`);
+        if (!/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(src)) throw new Error(`图片 ${id} 不是内嵌图片数据`);
+        seenIds.add(id);
+        return {
+          id,
+          name: String(asset.name || `图片${index + 1}`),
+          type: 'image',
+          src,
+          createdAt: Number(asset.createdAt) || Date.now()
+        };
+      });
+
+      return {
+        target: raw.target && typeof raw.target === 'object' && !Array.isArray(raw.target) ? raw.target : {},
+        section: {
+          title: String(section.title || ''),
+          md: section.md,
+          html: String(section.html || ''),
+          assets
+        }
+      };
+    }
+
+    function remapSectionPackageAssets(section) {
+      const idMap = new Map();
+      const assets = section.assets.map(asset => {
+        const newId = uid('img');
+        idMap.set(asset.id, newId);
+        return { ...asset, id: newId, createdAt: Date.now() };
+      });
+
+      const missing = new Set();
+      let md = section.md
+        .replace(/\[\[图片:([^\]]+)\]\]/g, (full, oldId) => {
+          const newId = idMap.get(oldId);
+          if (!newId) { missing.add(oldId); return full; }
+          return `[[图片:${newId}]]`;
+        })
+        .replace(/!\[([^\]]*)\]\(asset:([^)]+)\)/g, (full, alt, oldId) => {
+          const newId = idMap.get(oldId);
+          if (!newId) { missing.add(oldId); return full; }
+          return `![${alt}](asset:${newId})`;
+        });
+
+      if (missing.size) throw new Error(`Markdown 引用了缺失图片：${Array.from(missing).join('、')}`);
+      return { md, html: section.html, assets };
+    }
+
+    function getCurrentSectionTarget(info) {
+      const subject = getActiveSubject();
+      return {
+        subjectId: subject?.id || '',
+        subjectName: subject?.name || '',
+        path: (info?.path || []).map(node => String(node.title || '未命名'))
+      };
+    }
+
+    function formatTargetPath(target) {
+      const subject = String(target?.subjectName || target?.subjectId || '').trim();
+      const path = Array.isArray(target?.path) ? target.path.map(item => String(item)).filter(Boolean) : [];
+      return [subject, ...path].filter(Boolean).join(' / ') || '未指定';
+    }
+
+    function sectionTargetMismatch(packageTarget, currentTarget) {
+      if (packageTarget?.subjectId && packageTarget.subjectId !== currentTarget.subjectId) return true;
+      if (Array.isArray(packageTarget?.path) && packageTarget.path.length) {
+        const expected = packageTarget.path.map(item => String(item).trim()).filter(Boolean);
+        const current = currentTarget.path.map(item => String(item).trim()).filter(Boolean);
+        if (expected.length !== current.length || expected.some((item, index) => item !== current[index])) return true;
+      }
+      return false;
+    }
+
+    async function importSectionPackageFile(file) {
+      if (!file) return;
+      saveCurrentNode();
+      const info = findNodeById(state.activeNodeId);
+      if (!info) throw new Error('请先在左侧目录中选择要导入的小节');
+      if (file.size > MAX_SECTION_PACKAGE_BYTES) throw new Error('小节包超过 100MB，请先压缩图片后再导入');
+
+      const raw = JSON.parse(await file.text());
+      const packageData = parseSectionPackage(raw);
+      const currentTarget = getCurrentSectionTarget(info);
+      const packageTargetText = formatTargetPath(packageData.target);
+      const currentTargetText = formatTargetPath(currentTarget);
+      const mismatch = sectionTargetMismatch(packageData.target, currentTarget);
+      const imageCount = packageData.section.assets.length;
+      const sourceTitle = packageData.section.title || packageData.target?.title || '未命名小节';
+      const warning = mismatch
+        ? `\n\n⚠ 文件标注的目标与当前小节不一致，请仔细确认。`
+        : '';
+      const confirmed = confirm(
+        `即将导入小节包：${sourceTitle}\n` +
+        `文件目标：${packageTargetText}\n` +
+        `当前位置：${currentTargetText}\n` +
+        `包含图片：${imageCount} 张\n\n` +
+        `导入后会替换当前小节的 Markdown、HTML 和图片，但不会影响目录、子节或其他笔记。${warning}\n\n是否继续？`
+      );
+      if (!confirmed) return;
+
+      const imported = remapSectionPackageAssets(packageData.section);
+      const previous = {
+        md: info.node.md,
+        html: info.node.html,
+        assets: info.node.assets,
+        updatedAt: info.node.updatedAt
+      };
+
+      try {
+        info.node.md = imported.md;
+        info.node.html = imported.html;
+        info.node.assets = imported.assets;
+        compactInlineBase64Images(info.node);
+        info.node.updatedAt = Date.now();
+        await idbSet(DATA_KEY, state);
+      } catch (error) {
+        info.node.md = previous.md;
+        info.node.html = previous.html;
+        info.node.assets = previous.assets;
+        info.node.updatedAt = previous.updatedAt;
+        throw error;
+      }
+
+      markMindmapDirty();
+      renderAll();
+      scrollContentTop();
+      showToast(`小节包导入成功：已恢复 ${imageCount} 张图片`);
     }
 
 
@@ -1384,6 +1534,21 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       document.addEventListener('fullscreenchange', setPreviewFullscreenState);
       $('#exportAiBtn').onclick = exportAiKnowledge;
       $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
+      $('#importSectionBtn').onclick = () => {
+        saveCurrentNode();
+        if (!findNodeById(state.activeNodeId)) { showToast('请先选择要导入的小节'); return; }
+        $('#sectionPackageInput').click();
+      };
+      $('#sectionPackageInput').onchange = async e => {
+        const file = e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        try {
+          await importSectionPackageFile(file);
+        } catch (error) {
+          alert(`小节包导入失败：${error?.message || '文件格式不正确'}`);
+        }
+      };
       $('#importCancel').onclick = () => els.importMask.classList.remove('show');
       $('#importFileBtn').onclick = () => $('#importFileInput').click();
       $('#importFileInput').onchange = e => {

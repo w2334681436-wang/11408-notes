@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260616-1930-aiexport';
+  const version = window.__APP_VERSION__ || '20260723-1930-sectionpkg';
 
   function showVersion() {
     // 顶部副标题已按用户要求隐藏；版本号只保留在 window.__APP_VERSION__ 和缓存参数中。

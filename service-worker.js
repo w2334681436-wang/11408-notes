@@ -1,4 +1,4 @@
-const APP_VERSION = '20260616-1930-aiexport';
+const APP_VERSION = '20260723-1930-sectionpkg';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_NAME = `11408-notes-cache-${SW_VERSION}`;
 
