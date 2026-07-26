@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>11408 考研笔记框架系统</title>
   <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <meta name="theme-color" content="#2563eb" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -57,6 +59,7 @@
           <button class="small" id="pageSearchNextBtn" title="下一个匹配">下一个</button>
           <button class="small ghost" id="pageSearchClearBtn" title="清除页内搜索">清除</button>
         </div>
+        <span class="offline-status" id="offlineStatus" data-state="loading">正在准备离线资源…</span>
         <button class="soft" id="installAppBtn" hidden>安装离线版</button>
         <button class="soft" id="exportAiBtn">导出AI</button>
         <button class="primary" id="modeToggleBtn">编辑</button>

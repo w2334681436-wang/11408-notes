@@ -5,7 +5,8 @@
   "type": "module",
   "description": "可安装、可完全离线使用的 11408 考研笔记 PWA",
   "scripts": {
-    "build": "node scripts/build.mjs"
+    "build": "node scripts/build.mjs",
+    "verify:offline": "npm run build && node scripts/verify-offline.mjs dist"
   },
   "dependencies": {
     "mathjax": "3.2.2"

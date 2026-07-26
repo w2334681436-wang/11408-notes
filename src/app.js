@@ -4,6 +4,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     const SECTION_PACKAGE_APP = '11408-notes-section-package';
     const SECTION_PACKAGE_VERSION = 1;
     const MAX_SECTION_PACKAGE_BYTES = 100 * 1024 * 1024;
+    const MATHJAX_ASSET_URL = new URL('./vendor/mathjax/tex-svg.js', document.baseURI).href;
     const SUBJECTS = [
       { id: 'gaoshu', name: '高数', short: '高' },
       { id: 'xiandai', name: '线代', short: '线' },
@@ -588,7 +589,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     function htmlDoc(html) {
-      const cfg = `<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\\\(','\\\\)']],displayMath:[['$$','$$'],['\\\\[','\\\\]']],processEscapes:true},svg:{fontCache:'global'}};<\/script><script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"><\/script>`;
+      const cfg = `<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\\\(','\\\\)']],displayMath:[['$$','$$'],['\\\\[','\\\\]']],processEscapes:true},svg:{fontCache:'global'}};<\/script><script src="${escapeAttr(MATHJAX_ASSET_URL)}"><\/script>`;
       const body = (html || '').trim() ? html : '';
       return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${cfg}<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Arial,sans-serif;padding:16px;line-height:1.7;color:#172033}img{max-width:100%;border-radius:12px}pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:12px;overflow:auto}table{border-collapse:collapse;width:100%}td,th{border:1px solid #e5e7eb;padding:8px}</style></head><body>${body}</body></html>`;
     }
@@ -1223,7 +1224,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       svg: { fontCache: 'global' }
     };
   <\/script>
-  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"><\/script>
+  <script src="${escapeAttr(MATHJAX_ASSET_URL)}"><\/script>
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: #fff; color: #111827; }

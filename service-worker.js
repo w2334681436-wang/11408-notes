@@ -12,7 +12,9 @@ const PRECACHE_URLS = [
   `./src/app.js?v=${APP_VERSION}`,
   `./src/pwa.js?v=${APP_VERSION}`,
   './vendor/mathjax/tex-svg.js',
-  './icons/icon.svg'
+  './icons/icon.svg',
+  './icons/icon-192.png',
+  './icons/icon-512.png'
 ];
 
 function absoluteUrl(path) {
@@ -32,11 +34,13 @@ self.addEventListener('message', (event) => {
     event.waitUntil((async () => {
       const cache = await caches.open(CACHE_NAME);
       const matches = await Promise.all(PRECACHE_URLS.map((path) => cache.match(absoluteUrl(path), { ignoreSearch: true })));
-      event.source?.postMessage({
+      const result = {
         type: 'OFFLINE_READY',
         version: APP_VERSION,
         ready: matches.every(Boolean)
-      });
+      };
+      if (event.ports?.[0]) event.ports[0].postMessage(result);
+      else event.source?.postMessage(result);
     })());
   }
 });
@@ -86,27 +90,11 @@ async function navigationFallback(request) {
   }
 }
 
-async function localMathJax() {
-  const cache = await caches.open(CACHE_NAME);
-  const localUrl = absoluteUrl('./vendor/mathjax/tex-svg.js');
-  const cached = await cache.match(localUrl, { ignoreSearch: true });
-  if (cached) return cached;
-  return fetch(localUrl);
-}
-
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  const isLegacyMathJaxCdn = url.hostname === 'cdn.jsdelivr.net'
-    && /\/npm\/mathjax@3(?:[^/]*)\/es5\/tex-svg(?:-full)?\.js$/.test(url.pathname);
-
-  if (isLegacyMathJaxCdn) {
-    event.respondWith(localMathJax());
-    return;
-  }
-
   if (request.mode === 'navigate') {
     event.respondWith(navigationFallback(request));
     return;

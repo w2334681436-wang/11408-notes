@@ -1,12 +1,8 @@
 (function () {
   const version = window.__APP_VERSION__ || '20260726-fully-offline';
-  const localMathJaxUrl = new URL('./vendor/mathjax/tex-svg.js', document.baseURI).href;
-  const legacyMathJaxPattern = /https:\/\/cdn\.jsdelivr\.net\/npm\/mathjax@3(?:[^/]*)\/es5\/tex-svg(?:-full)?\.js/g;
+  const statusEl = document.getElementById('offlineStatus');
+  const installBtn = document.getElementById('installAppBtn');
   let deferredInstallPrompt = null;
-
-  function showVersion() {
-    // 顶部副标题按用户要求保持隐藏；版本号仅用于资源更新与离线缓存。
-  }
 
   function notify(message) {
     const toast = document.getElementById('toast');
@@ -16,99 +12,115 @@
     window.setTimeout(() => toast.classList.remove('show'), 2200);
   }
 
-  function patchHtmlBlobMathJax() {
-    const NativeBlob = window.Blob;
-    if (!NativeBlob || NativeBlob.__11408OfflinePatched) return;
-
-    function OfflineBlob(parts, options) {
-      const type = String(options?.type || '').toLowerCase();
-      const nextParts = type.includes('text/html')
-        ? Array.from(parts || [], (part) => typeof part === 'string'
-          ? part.replace(legacyMathJaxPattern, localMathJaxUrl)
-          : part)
-        : parts;
-      return new NativeBlob(nextParts, options);
-    }
-
-    OfflineBlob.prototype = NativeBlob.prototype;
-    Object.setPrototypeOf(OfflineBlob, NativeBlob);
-    OfflineBlob.__11408OfflinePatched = true;
-    window.Blob = OfflineBlob;
+  function setOfflineStatus(text, state) {
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.dataset.state = state;
+    statusEl.title = state === 'ready'
+      ? '页面、脚本、样式、图标和公式引擎已保存到本机'
+      : text;
   }
 
-  function setupInstallButton() {
-    const button = document.getElementById('installAppBtn');
-    if (!button) return;
-
-    window.addEventListener('beforeinstallprompt', (event) => {
-      event.preventDefault();
-      deferredInstallPrompt = event;
-      button.hidden = false;
-    });
-
-    button.addEventListener('click', async () => {
-      if (!deferredInstallPrompt) {
-        notify('浏览器菜单中选择“安装应用”或“添加到主屏幕”');
+  function queryOfflineStatus(worker) {
+    return new Promise((resolve) => {
+      if (!worker) {
+        resolve(null);
         return;
       }
-      deferredInstallPrompt.prompt();
-      await deferredInstallPrompt.userChoice.catch(() => null);
-      deferredInstallPrompt = null;
-      button.hidden = true;
-    });
-
-    window.addEventListener('appinstalled', () => {
-      deferredInstallPrompt = null;
-      button.hidden = true;
-      notify('离线版已安装，可以断网打开');
+      const channel = new MessageChannel();
+      const timeout = window.setTimeout(() => resolve(null), 3000);
+      channel.port1.onmessage = (event) => {
+        window.clearTimeout(timeout);
+        resolve(event.data);
+      };
+      worker.postMessage({ type: 'CHECK_OFFLINE_READY' }, [channel.port2]);
     });
   }
 
-  function requestOfflineStatus(registration) {
-    const worker = registration.active || registration.waiting || registration.installing;
-    worker?.postMessage({ type: 'CHECK_OFFLINE_READY' });
+  async function refreshConnectionStatus() {
+    if (!navigator.onLine) {
+      setOfflineStatus('离线模式', 'offline');
+      return;
+    }
+    const worker = navigator.serviceWorker?.controller;
+    const status = await queryOfflineStatus(worker);
+    setOfflineStatus(
+      status?.ready ? '可离线使用' : '正在准备离线资源…',
+      status?.ready ? 'ready' : 'loading'
+    );
   }
 
-  showVersion();
-  patchHtmlBlobMathJax();
-  setupInstallButton();
-  window.addEventListener('DOMContentLoaded', showVersion);
+  window.addEventListener('online', refreshConnectionStatus);
+  window.addEventListener('offline', refreshConnectionStatus);
 
-  if (!('serviceWorker' in navigator)) return;
-
-  navigator.serviceWorker.addEventListener('message', (event) => {
-    if (event.data?.type !== 'OFFLINE_READY' || !event.data.ready) return;
-    const readyKey = `11408-offline-ready-${event.data.version || version}`;
-    if (localStorage.getItem(readyKey)) return;
-    localStorage.setItem(readyKey, '1');
-    notify('离线资源已缓存完成，断网也能使用');
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    if (installBtn) installBtn.hidden = false;
   });
 
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    if (installBtn) installBtn.hidden = true;
+    setOfflineStatus('已安装 · 可离线', 'ready');
+    notify('离线版已安装，可以断网打开');
+  });
+
+  installBtn?.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) {
+      notify('浏览器菜单中选择“安装应用”或“添加到主屏幕”');
+      return;
+    }
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(() => null);
+    deferredInstallPrompt = null;
+    installBtn.hidden = true;
+  });
+
+  if (!('serviceWorker' in navigator)) {
+    setOfflineStatus('浏览器不支持离线安装', 'error');
+    return;
+  }
+
   window.addEventListener('load', async () => {
+    setOfflineStatus('正在准备离线资源…', 'loading');
     try {
       const registration = await navigator.serviceWorker.register(`./service-worker.js?v=${version}`, {
+        scope: './',
         updateViaCache: 'none'
       });
-
-      registration.update().catch(() => {});
 
       if (registration.waiting) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
 
       registration.addEventListener('updatefound', () => {
         const worker = registration.installing;
         if (!worker) return;
+        setOfflineStatus('正在更新离线资源…', 'loading');
         worker.addEventListener('statechange', () => {
-          if (worker.state === 'installed') {
-            if (navigator.serviceWorker.controller) worker.postMessage({ type: 'SKIP_WAITING' });
-            requestOfflineStatus(registration);
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            worker.postMessage({ type: 'SKIP_WAITING' });
           }
         });
       });
 
       const readyRegistration = await navigator.serviceWorker.ready;
-      requestOfflineStatus(readyRegistration);
+      const activeWorker = readyRegistration.active || navigator.serviceWorker.controller;
+      const status = await queryOfflineStatus(activeWorker);
+      if (status?.ready) {
+        setOfflineStatus(navigator.onLine ? '可离线使用' : '离线模式', navigator.onLine ? 'ready' : 'offline');
+        const readyKey = `11408-offline-ready-${status.version || version}`;
+        if (!localStorage.getItem(readyKey)) {
+          localStorage.setItem(readyKey, '1');
+          notify('离线资源已缓存完成，断网也能使用');
+        }
+      } else {
+        setOfflineStatus('离线资源未完整，请联网刷新', 'error');
+      }
+
+      registration.update().catch(() => {});
     } catch (error) {
       console.warn('Service Worker 注册失败：', error);
+      setOfflineStatus('离线功能准备失败', 'error');
     }
   });
 })();
