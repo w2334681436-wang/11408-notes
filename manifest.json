@@ -1,13 +1,18 @@
 {
+  "id": "./",
   "name": "11408 考研笔记框架系统",
   "short_name": "11408笔记",
-  "description": "11408 考研笔记框架系统：Markdown、公式、HTML渲染、图片资源、IndexedDB、本地导入导出。",
-  "start_url": "./index.html",
+  "description": "可安装、可完全离线使用的 11408 考研笔记系统。",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "background_color": "#f6f8fb",
   "theme_color": "#2563eb",
   "orientation": "any",
+  "lang": "zh-CN",
+  "categories": ["education", "productivity"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "./icons/icon.svg",
