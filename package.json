@@ -1,0 +1,16 @@
+{
+  "name": "11408-notes",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "可安装、可完全离线使用的 11408 考研笔记 PWA",
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "mathjax": "3.2.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
