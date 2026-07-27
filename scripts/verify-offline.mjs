@@ -174,6 +174,9 @@ assert.match(annotationHtml, /id="annotationSettingsPanel"/);
 assert.match(annotationJs, /event\.pointerType !== 'pen'/);
 assert.match(annotationJs, /node\.annotations/);
 assert.match(annotationJs, /idbSet\(DATA_KEY, state\)/);
+assert.match(annotationJs, /sanitizeAnnotationPoints/);
+assert.match(annotationJs, /clientX < shellRect\.left/);
+assert.match(annotationJs, /distance > maxContinuousJump/);
 assert.match(annotationCss, /\.annotation-canvas/);
 
 console.log('Offline verification passed: app shell, navigation, scripts and MathJax work without network.');

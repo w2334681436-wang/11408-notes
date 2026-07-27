@@ -137,11 +137,29 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     function normalizeAnnotationPoint(point) {
+      const x = Number(point?.x);
+      const y = Number(point?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
       return {
-        x: Math.min(1, Math.max(0, Number(point?.x) || 0)),
-        y: Math.min(1, Math.max(0, Number(point?.y) || 0)),
+        x: Math.min(1, Math.max(0, x)),
+        y: Math.min(1, Math.max(0, y)),
         pressure: Math.min(1, Math.max(0.05, Number(point?.pressure) || 0.5))
       };
+    }
+
+    function sanitizeAnnotationPoints(points) {
+      const normalized = (Array.isArray(points) ? points : [])
+        .slice(0, 12000)
+        .map(normalizeAnnotationPoint)
+        .filter(Boolean);
+      return normalized.filter((point, index) => {
+        if (point.x > 0.0005 || point.y > 0.0005) return true;
+        const previous = normalized[index - 1];
+        const next = normalized[index + 1];
+        const neighbor = previous || next;
+        if (!neighbor) return false;
+        return Math.hypot(neighbor.x - point.x, neighbor.y - point.y) < 0.02;
+      });
     }
 
     function normalizeNodeAnnotations(node) {
@@ -153,8 +171,9 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         .map(stroke => ({
           color: /^#[0-9a-f]{6}$/i.test(String(stroke.color || '')) ? String(stroke.color) : '#ef4444',
           size: Math.min(16, Math.max(1, Number(stroke.size) || 4)),
-          points: stroke.points.slice(0, 12000).map(normalizeAnnotationPoint)
-        }));
+          points: sanitizeAnnotationPoints(stroke.points)
+        }))
+        .filter(stroke => stroke.points.length);
     }
 
     function drawAnnotationDot(ctx, point, stroke, width, height) {
@@ -222,10 +241,25 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     function annotationPointFromEvent(event) {
       const canvas = els.annotationCanvas;
       const metrics = annotationMetrics();
+      const shell = getPreviewShell();
+      const clientX = Number(event?.clientX);
+      const clientY = Number(event?.clientY);
+      if (!canvas || !shell || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+      const shellRect = shell.getBoundingClientRect();
+      const edgeTolerance = 8;
+      if (
+        clientX < shellRect.left - edgeTolerance
+        || clientX > shellRect.right + edgeTolerance
+        || clientY < shellRect.top - edgeTolerance
+        || clientY > shellRect.bottom + edgeTolerance
+      ) return null;
       const rect = canvas.getBoundingClientRect();
+      const x = (clientX - rect.left) / metrics.width;
+      const y = (clientY - rect.top) / metrics.height;
+      if (x < -0.01 || x > 1.01 || y < -0.01 || y > 1.01) return null;
       return normalizeAnnotationPoint({
-        x: (event.clientX - rect.left) / metrics.width,
-        y: (event.clientY - rect.top) / metrics.height,
+        x,
+        y,
         pressure: event.pressure > 0 ? event.pressure : 0.5
       });
     }
@@ -266,6 +300,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       const stroke = annotationState.currentStroke;
       if (!stroke || stroke.points.length >= 12000) return;
       const point = annotationPointFromEvent(event);
+      if (!point) return;
       const previous = stroke.points[stroke.points.length - 1];
       const metrics = annotationMetrics();
       if (previous) {
@@ -274,6 +309,8 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
           (point.y - previous.y) * metrics.height
         );
         if (distance < 0.45) return;
+        const maxContinuousJump = Math.max(180, Math.min(320, Math.min(metrics.width, metrics.height) * 0.28));
+        if (distance > maxContinuousJump) return;
       }
       stroke.points.push(point);
       const ctx = els.annotationCanvas?.getContext('2d');
@@ -302,8 +339,9 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     function moveStylusStroke(event) {
       if (!annotationState.drawing || event.pointerId !== annotationState.pointerId || event.pointerType !== 'pen') return;
       event.preventDefault();
-      const events = event.getCoalescedEvents?.() || [event];
-      events.forEach(appendAnnotationEvent);
+      const coalesced = event.getCoalescedEvents?.() || [];
+      coalesced.forEach(appendAnnotationEvent);
+      appendAnnotationEvent(event);
     }
 
     function finishStylusStroke(event) {
