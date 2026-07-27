@@ -166,4 +166,15 @@ for (const file of coreFiles) {
   );
 }
 
+const annotationHtml = await fs.readFile(path.join(root, 'index.html'), 'utf8');
+const annotationJs = await fs.readFile(path.join(root, 'src/app.js'), 'utf8');
+const annotationCss = await fs.readFile(path.join(root, 'styles/app.css'), 'utf8');
+assert.match(annotationHtml, /id="annotationCanvas"/);
+assert.match(annotationHtml, /id="annotationSettingsPanel"/);
+assert.match(annotationJs, /event\.pointerType !== 'pen'/);
+assert.match(annotationJs, /node\.annotations/);
+assert.match(annotationJs, /idbSet\(DATA_KEY, state\)/);
+assert.match(annotationCss, /\.annotation-canvas/);
+
 console.log('Offline verification passed: app shell, navigation, scripts and MathJax work without network.');
+console.log('Stylus verification passed: pen detection, annotation canvas and IndexedDB persistence are present.');

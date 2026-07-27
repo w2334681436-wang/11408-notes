@@ -26,7 +26,7 @@
   <script>
     (function () {
       // 每次发布新版时只需要更新这里的版本号；不要每次打开都随机生成，否则 PWA/Service Worker 会反复重装并造成频闪。
-      const APP_VERSION = '20260726-fully-offline';
+      const APP_VERSION = '20260727-stylus-v1';
       window.__APP_VERSION__ = APP_VERSION;
       document.documentElement.setAttribute('data-app-version', APP_VERSION);
       const css = document.createElement('link');
@@ -154,13 +154,43 @@
             <div class="focus-preview-actions">
               <button class="small soft" id="focusPrevBtn">上一节</button>
               <button class="small soft" id="focusNextBtn">下一节</button>
+              <button class="small soft annotation-settings-btn" id="annotationSettingsBtn" title="手写标记设置" aria-label="手写标记设置">⚙</button>
               <button class="small soft" id="focusHtmlBtn">显示HTML</button>
               <button class="small primary" id="focusEditBtn2">切换编辑</button>
               <button class="small" id="focusExitBtn">退出全屏</button>
             </div>
           </div>
+          <div class="annotation-settings-panel" id="annotationSettingsPanel" hidden>
+            <div class="annotation-settings-head">
+              <div>
+                <strong>触控笔标记</strong>
+                <span>触控笔写字，手指仍可上下滑动</span>
+              </div>
+              <button class="small ghost" id="annotationSettingsCloseBtn" aria-label="关闭手写设置">×</button>
+            </div>
+            <label class="annotation-toggle-row">
+              <span>启用笔刷</span>
+              <input type="checkbox" id="annotationEnabledInput" checked />
+            </label>
+            <label class="annotation-setting-row">
+              <span>颜色</span>
+              <input type="color" id="annotationColorInput" value="#ef4444" />
+            </label>
+            <label class="annotation-setting-row">
+              <span>粗细</span>
+              <input type="range" id="annotationSizeInput" min="1" max="16" step="1" value="4" />
+              <output id="annotationSizeValue">4 px</output>
+            </label>
+            <div class="annotation-setting-actions">
+              <button class="small soft" id="annotationUndoBtn">撤销一笔</button>
+              <button class="small danger" id="annotationClearBtn">清空本节</button>
+              <button class="small primary" id="annotationSaveBtn">保存</button>
+            </div>
+            <div class="annotation-save-state" id="annotationSaveState">笔迹按小节自动保存</div>
+          </div>
           <div class="preview-shell">
             <article class="preview" id="preview"></article>
+            <canvas class="annotation-canvas" id="annotationCanvas" aria-hidden="true"></canvas>
           </div>
         </div>
       </section>

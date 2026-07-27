@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260726-fully-offline';
+  const version = window.__APP_VERSION__ || '20260727-stylus-v1';
   const statusEl = document.getElementById('offlineStatus');
   const installBtn = document.getElementById('installAppBtn');
   let deferredInstallPrompt = null;

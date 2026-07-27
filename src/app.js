@@ -27,6 +27,14 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let pageTocState = { collapsed: true, headings: [], activeId: '' };
     let scrollSyncState = { lock: false, raf: 0 };
     let pdfRenderNodeId = null;
+    let previewFallbackFocus = false;
+    let annotationState = {
+      drawing: false,
+      pointerId: null,
+      currentStroke: null,
+      resizeObserver: null,
+      saveTimer: null
+    };
 
     const $ = s => document.querySelector(s);
     const els = {
@@ -38,11 +46,15 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       modalMask: $('#modalMask'), modalTitle: $('#modalTitle'), modalInput: $('#modalInput'),
       importMask: $('#importMask'), importText: $('#importText'),
       htmlCenterMask: $('#htmlCenterMask'), htmlCenterPanel: $('#htmlCenterPanel'), htmlCenterFrame: $('#htmlCenterFrame'),
+      annotationCanvas: $('#annotationCanvas'), annotationSettingsPanel: $('#annotationSettingsPanel'),
+      annotationSettingsBtn: $('#annotationSettingsBtn'), annotationEnabledInput: $('#annotationEnabledInput'),
+      annotationColorInput: $('#annotationColorInput'), annotationSizeInput: $('#annotationSizeInput'),
+      annotationSizeValue: $('#annotationSizeValue'), annotationSaveState: $('#annotationSaveState'),
       toast: $('#toast')
     };
 
     function uid(prefix='n') { return prefix + '_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
-    function createNode(title, level=1, md='') { return { id: uid(), title, level, md, html: '', assets: [], children: [], createdAt: Date.now(), updatedAt: Date.now() }; }
+    function createNode(title, level=1, md='') { return { id: uid(), title, level, md, html: '', assets: [], annotations: [], children: [], createdAt: Date.now(), updatedAt: Date.now() }; }
 
     function defaultData() {
       const subjects = SUBJECTS.map(s => ({ ...s, nodes: [] }));
@@ -97,6 +109,262 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     function getImageAsset(node, id) {
       const assets = ensureNodeAssets(node);
       return assets.find(asset => asset.id === id);
+    }
+
+    function ensureNodeAnnotations(node) {
+      if (!node) return [];
+      if (!Array.isArray(node.annotations)) node.annotations = [];
+      return node.annotations;
+    }
+
+    function getAnnotationSettings() {
+      const raw = state.annotationSettings && typeof state.annotationSettings === 'object'
+        ? state.annotationSettings
+        : {};
+      const color = /^#[0-9a-f]{6}$/i.test(String(raw.color || '')) ? String(raw.color) : '#ef4444';
+      const size = Math.min(16, Math.max(1, Number(raw.size) || 4));
+      state.annotationSettings = { enabled: raw.enabled !== false, color, size };
+      return state.annotationSettings;
+    }
+
+    function isPreviewFocusActive() {
+      const card = document.querySelector('.preview-card');
+      return !!card && (document.fullscreenElement === card || card.classList.contains('is-preview-fullscreen'));
+    }
+
+    function annotationMetrics() {
+      return annotationState.metrics || { width: 1, height: 1, dpr: 1 };
+    }
+
+    function normalizeAnnotationPoint(point) {
+      return {
+        x: Math.min(1, Math.max(0, Number(point?.x) || 0)),
+        y: Math.min(1, Math.max(0, Number(point?.y) || 0)),
+        pressure: Math.min(1, Math.max(0.05, Number(point?.pressure) || 0.5))
+      };
+    }
+
+    function normalizeNodeAnnotations(node) {
+      if (!node) return;
+      const strokes = Array.isArray(node.annotations) ? node.annotations : [];
+      node.annotations = strokes
+        .filter(stroke => stroke && Array.isArray(stroke.points) && stroke.points.length)
+        .slice(-2000)
+        .map(stroke => ({
+          color: /^#[0-9a-f]{6}$/i.test(String(stroke.color || '')) ? String(stroke.color) : '#ef4444',
+          size: Math.min(16, Math.max(1, Number(stroke.size) || 4)),
+          points: stroke.points.slice(0, 12000).map(normalizeAnnotationPoint)
+        }));
+    }
+
+    function drawAnnotationDot(ctx, point, stroke, width, height) {
+      const pressure = Math.min(1, Math.max(0.05, Number(point.pressure) || 0.5));
+      const radius = Math.max(0.75, stroke.size * (0.35 + pressure * 0.35));
+      ctx.beginPath();
+      ctx.arc(point.x * width, point.y * height, radius, 0, Math.PI * 2);
+      ctx.fillStyle = stroke.color;
+      ctx.fill();
+    }
+
+    function drawAnnotationSegment(ctx, stroke, index, width, height) {
+      const current = stroke.points[index];
+      if (!current) return;
+      if (index === 0) {
+        drawAnnotationDot(ctx, current, stroke, width, height);
+        return;
+      }
+      const previous = stroke.points[index - 1];
+      const pressure = (Number(previous.pressure) + Number(current.pressure)) / 2 || 0.5;
+      ctx.beginPath();
+      ctx.moveTo(previous.x * width, previous.y * height);
+      ctx.lineTo(current.x * width, current.y * height);
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = Math.max(1, stroke.size * (0.55 + pressure * 0.75));
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
+    function redrawAnnotationCanvas() {
+      const canvas = els.annotationCanvas;
+      if (!canvas) return;
+      const metrics = annotationMetrics();
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+      ctx.clearRect(0, 0, metrics.width, metrics.height);
+      const info = findNodeById(state.activeNodeId);
+      const strokes = ensureNodeAnnotations(info?.node);
+      strokes.forEach(stroke => {
+        for (let index = 0; index < stroke.points.length; index++) {
+          drawAnnotationSegment(ctx, stroke, index, metrics.width, metrics.height);
+        }
+      });
+    }
+
+    function refreshAnnotationCanvas() {
+      const canvas = els.annotationCanvas;
+      const shell = getPreviewShell();
+      if (!canvas || !shell) return;
+      const width = Math.max(1, shell.clientWidth);
+      const height = Math.max(1, shell.clientHeight, els.preview?.offsetHeight || 0, els.preview?.scrollHeight || 0);
+      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+      const pixelWidth = Math.round(width * dpr);
+      const pixelHeight = Math.round(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+      annotationState.metrics = { width, height, dpr };
+      redrawAnnotationCanvas();
+    }
+
+    function annotationPointFromEvent(event) {
+      const canvas = els.annotationCanvas;
+      const metrics = annotationMetrics();
+      const rect = canvas.getBoundingClientRect();
+      return normalizeAnnotationPoint({
+        x: (event.clientX - rect.left) / metrics.width,
+        y: (event.clientY - rect.top) / metrics.height,
+        pressure: event.pressure > 0 ? event.pressure : 0.5
+      });
+    }
+
+    function updateAnnotationControls() {
+      const settings = getAnnotationSettings();
+      if (els.annotationEnabledInput) els.annotationEnabledInput.checked = settings.enabled;
+      if (els.annotationColorInput) els.annotationColorInput.value = settings.color;
+      if (els.annotationSizeInput) els.annotationSizeInput.value = String(settings.size);
+      if (els.annotationSizeValue) els.annotationSizeValue.textContent = `${settings.size} px`;
+      const card = document.querySelector('.preview-card');
+      card?.classList.toggle('annotation-brush-enabled', settings.enabled);
+      els.annotationSettingsBtn?.classList.toggle('active', settings.enabled);
+      els.annotationSettingsBtn?.setAttribute('title', settings.enabled ? '手写标记已开启' : '手写标记已关闭');
+    }
+
+    function setAnnotationSaveState(text) {
+      if (els.annotationSaveState) els.annotationSaveState.textContent = text;
+    }
+
+    function persistAnnotations(immediate = false) {
+      clearTimeout(annotationState.saveTimer);
+      setAnnotationSaveState('正在保存笔迹…');
+      const save = async () => {
+        try {
+          await idbSet(DATA_KEY, state);
+          setAnnotationSaveState(`已保存 · ${new Date().toLocaleTimeString()}`);
+        } catch (error) {
+          setAnnotationSaveState('保存失败，请重试');
+        }
+      };
+      if (immediate) return save();
+      annotationState.saveTimer = setTimeout(save, 220);
+      return Promise.resolve();
+    }
+
+    function appendAnnotationEvent(event) {
+      const stroke = annotationState.currentStroke;
+      if (!stroke || stroke.points.length >= 12000) return;
+      const point = annotationPointFromEvent(event);
+      const previous = stroke.points[stroke.points.length - 1];
+      const metrics = annotationMetrics();
+      if (previous) {
+        const distance = Math.hypot(
+          (point.x - previous.x) * metrics.width,
+          (point.y - previous.y) * metrics.height
+        );
+        if (distance < 0.45) return;
+      }
+      stroke.points.push(point);
+      const ctx = els.annotationCanvas?.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+      drawAnnotationSegment(ctx, stroke, stroke.points.length - 1, metrics.width, metrics.height);
+    }
+
+    function startStylusStroke(event) {
+      const settings = getAnnotationSettings();
+      if (!settings.enabled || !isPreviewFocusActive() || event.pointerType !== 'pen') return;
+      const info = findNodeById(state.activeNodeId);
+      if (!info) return;
+      event.preventDefault();
+      refreshAnnotationCanvas();
+      const stroke = { color: settings.color, size: settings.size, points: [] };
+      ensureNodeAnnotations(info.node).push(stroke);
+      annotationState.drawing = true;
+      annotationState.pointerId = event.pointerId;
+      annotationState.currentStroke = stroke;
+      getPreviewShell()?.setPointerCapture?.(event.pointerId);
+      appendAnnotationEvent(event);
+      setAnnotationSaveState('正在书写…');
+    }
+
+    function moveStylusStroke(event) {
+      if (!annotationState.drawing || event.pointerId !== annotationState.pointerId || event.pointerType !== 'pen') return;
+      event.preventDefault();
+      const events = event.getCoalescedEvents?.() || [event];
+      events.forEach(appendAnnotationEvent);
+    }
+
+    function finishStylusStroke(event) {
+      if (!annotationState.drawing || event.pointerId !== annotationState.pointerId) return;
+      if (event.pointerType === 'pen') {
+        event.preventDefault();
+        appendAnnotationEvent(event);
+      }
+      getPreviewShell()?.releasePointerCapture?.(event.pointerId);
+      annotationState.drawing = false;
+      annotationState.pointerId = null;
+      annotationState.currentStroke = null;
+      persistAnnotations();
+    }
+
+    function bindAnnotationCanvas() {
+      const shell = getPreviewShell();
+      if (!shell || shell.dataset.annotationBound) return;
+      shell.dataset.annotationBound = '1';
+      shell.addEventListener('pointerdown', startStylusStroke, { passive: false });
+      shell.addEventListener('pointermove', moveStylusStroke, { passive: false });
+      shell.addEventListener('pointerup', finishStylusStroke, { passive: false });
+      shell.addEventListener('pointercancel', finishStylusStroke, { passive: false });
+      if ('ResizeObserver' in window) {
+        annotationState.resizeObserver?.disconnect?.();
+        annotationState.resizeObserver = new ResizeObserver(() => {
+          if (isPreviewFocusActive()) requestAnimationFrame(refreshAnnotationCanvas);
+        });
+        annotationState.resizeObserver.observe(shell);
+        if (els.preview) annotationState.resizeObserver.observe(els.preview);
+      } else {
+        window.addEventListener('resize', refreshAnnotationCanvas, { passive: true });
+      }
+      updateAnnotationControls();
+    }
+
+    function undoAnnotationStroke() {
+      const info = findNodeById(state.activeNodeId);
+      const strokes = ensureNodeAnnotations(info?.node);
+      if (!strokes.length) {
+        showToast('当前小节还没有手写标记');
+        return;
+      }
+      strokes.pop();
+      redrawAnnotationCanvas();
+      persistAnnotations();
+      showToast('已撤销上一笔');
+    }
+
+    function clearAnnotationStrokes() {
+      const info = findNodeById(state.activeNodeId);
+      const strokes = ensureNodeAnnotations(info?.node);
+      if (!strokes.length) {
+        showToast('当前小节还没有手写标记');
+        return;
+      }
+      if (!confirm('确定清空当前小节的全部手写标记吗？')) return;
+      info.node.annotations = [];
+      redrawAnnotationCanvas();
+      persistAnnotations();
+      showToast('已清空当前小节的手写标记');
     }
 
     function shortImageLabel(name) {
@@ -368,7 +636,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       }
     }
 
-    function renderAll() { applyMode(); renderSubjects(); renderTree(); renderEditor(); bindScrollSync(); runSearch(); updateHtmlGlobalButton(); }
+    function renderAll() { applyMode(); renderSubjects(); renderTree(); renderEditor(); bindScrollSync(); bindAnnotationCanvas(); runSearch(); updateHtmlGlobalButton(); updateAnnotationControls(); }
 
     function renderSubjects() {
       els.subjectList.innerHTML = '';
@@ -411,7 +679,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       ['addSiblingBtn','addChildBtn','deleteNodeBtn','moveUpBtn','moveDownBtn','prevBtn','nextBtn'].forEach(id => $('#' + id).disabled = !hasNode);
       if (!hasNode) {
         els.breadcrumb.textContent = '请选择或创建一个小节'; els.titleInput.value = ''; els.mdEditor.value = ''; els.htmlEditor.value = '';
-        els.preview.innerHTML = '<div class="empty"><div><h2>还没有选择小节</h2><p>从左侧目录选择，或点击“+章”创建。</p></div></div>'; renderPageToc(); updateHtmlGlobalButton(); return;
+        els.preview.innerHTML = '<div class="empty"><div><h2>还没有选择小节</h2><p>从左侧目录选择，或点击“+章”创建。</p></div></div>'; renderPageToc(); updateHtmlGlobalButton(); requestAnimationFrame(refreshAnnotationCanvas); return;
       }
       const { node, path } = info;
       els.breadcrumb.textContent = getActiveSubject().name + ' / ' + path.map(p => p.title).join(' / ');
@@ -431,8 +699,13 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         if (htmlCode.trim()) setHtmlCenterContent(htmlCode);
         else closeHtmlCenter();
       }
-      typesetMath().then(() => { refreshPageTocActive(); applyPageSearch({ scroll: false, preserveIndex: true }); });
+      typesetMath().then(() => {
+        refreshPageTocActive();
+        applyPageSearch({ scroll: false, preserveIndex: true });
+        requestAnimationFrame(refreshAnnotationCanvas);
+      });
       updateHtmlGlobalButton();
+      updateAnnotationControls();
     }
 
 
@@ -1479,24 +1752,67 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
           if (typeof node.html !== 'string') node.html = '';
           if (typeof node.md !== 'string') node.md = '';
           ensureNodeAssets(node);
+          normalizeNodeAnnotations(node);
           compactInlineBase64Images(node);
           const htmlText = node.html.trim();
           if (htmlText.includes('HTML 渲染窗口示例') && htmlText.includes('a^2+b^2=c^2')) node.html = '';
         });
       }
+      getAnnotationSettings();
     }
 
     function setPreviewFullscreenState() {
       const previewCard = document.querySelector('.preview-card');
-      const active = document.fullscreenElement === previewCard;
-      if (previewCard) previewCard.classList.toggle('is-preview-fullscreen', active);
+      const nativeActive = document.fullscreenElement === previewCard;
+      const active = nativeActive || previewFallbackFocus;
+      if (previewCard) {
+        previewCard.classList.toggle('is-preview-fullscreen', active);
+        previewCard.classList.toggle('is-preview-fallback', previewFallbackFocus);
+      }
+      document.body.classList.toggle('preview-focus-fallback', previewFallbackFocus);
       if (active && previewCard && els.htmlCenterMask.parentElement !== previewCard) {
         previewCard.appendChild(els.htmlCenterMask);
       } else if (!active && els.htmlCenterMask.parentElement !== document.body) {
         document.body.appendChild(els.htmlCenterMask);
       }
+      if (!active && els.annotationSettingsPanel) els.annotationSettingsPanel.hidden = true;
       updatePrevNextState();
       updateHtmlGlobalButton();
+      updateAnnotationControls();
+      requestAnimationFrame(refreshAnnotationCanvas);
+    }
+
+    function openPreviewFallbackFocus() {
+      previewFallbackFocus = true;
+      setPreviewFullscreenState();
+    }
+
+    function exitPreviewFocus() {
+      if (document.fullscreenElement) {
+        document.exitFullscreen?.();
+        return;
+      }
+      previewFallbackFocus = false;
+      setPreviewFullscreenState();
+    }
+
+    function togglePreviewFocus() {
+      const previewCard = document.querySelector('.preview-card');
+      if (!previewCard) return;
+      if (isPreviewFocusActive()) {
+        exitPreviewFocus();
+        return;
+      }
+      if (!previewCard.requestFullscreen) {
+        openPreviewFallbackFocus();
+        return;
+      }
+      try {
+        const request = previewCard.requestFullscreen();
+        request?.catch?.(openPreviewFallbackFocus);
+      } catch (error) {
+        openPreviewFallbackFocus();
+      }
     }
 
     function switchToEditModeFromFocus() {
@@ -1510,12 +1826,17 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       };
       if (document.fullscreenElement) {
         document.exitFullscreen?.().then(finish).catch(finish);
-      } else finish();
+      } else {
+        previewFallbackFocus = false;
+        setPreviewFullscreenState();
+        finish();
+      }
     }
 
     function bindEvents() {
       bindMindmapPan();
       bindScrollSync();
+      bindAnnotationCanvas();
       $('#modeToggleBtn').onclick = () => { saveCurrentNode(); state.uiMode = state.uiMode === 'preview' ? 'edit' : 'preview'; applyMode(); renderEditor(); bindScrollSync(); if (state.uiMode === 'edit') syncPreviewToEditorPosition(); scheduleSave(); };
       $('#mobileMenuBtn').onclick = () => els.sidebar.classList.toggle('show');
       $('#htmlGlobalBtn').onclick = openHtmlCenter;
@@ -1526,12 +1847,39 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#prevBtn').onclick = () => goPrevNext(-1); $('#nextBtn').onclick = () => goPrevNext(1);
       $('#focusPrevBtn').onclick = () => goPrevNext(-1); $('#focusNextBtn').onclick = () => goPrevNext(1);
       $('#focusHtmlBtn').onclick = openHtmlCenter;
+      els.annotationSettingsBtn.onclick = e => {
+        e.stopPropagation();
+        els.annotationSettingsPanel.hidden = !els.annotationSettingsPanel.hidden;
+        if (!els.annotationSettingsPanel.hidden) updateAnnotationControls();
+      };
+      $('#annotationSettingsCloseBtn').onclick = () => { els.annotationSettingsPanel.hidden = true; };
+      els.annotationEnabledInput.onchange = () => {
+        getAnnotationSettings().enabled = els.annotationEnabledInput.checked;
+        updateAnnotationControls();
+        persistAnnotations();
+      };
+      els.annotationColorInput.oninput = () => {
+        getAnnotationSettings().color = els.annotationColorInput.value;
+        updateAnnotationControls();
+        persistAnnotations();
+      };
+      els.annotationSizeInput.oninput = () => {
+        getAnnotationSettings().size = Math.min(16, Math.max(1, Number(els.annotationSizeInput.value) || 4));
+        updateAnnotationControls();
+        persistAnnotations();
+      };
+      $('#annotationUndoBtn').onclick = undoAnnotationStroke;
+      $('#annotationClearBtn').onclick = clearAnnotationStrokes;
+      $('#annotationSaveBtn').onclick = async () => {
+        await persistAnnotations(true);
+        showToast('手写标记已保存');
+      };
       $('#focusEditBtn2').onclick = switchToEditModeFromFocus;
-      $('#focusExitBtn').onclick = () => { if (document.fullscreenElement) document.exitFullscreen?.(); };
+      $('#focusExitBtn').onclick = exitPreviewFocus;
       $('#fullscreenBtn').onclick = () => toggleFullscreen(document.documentElement);
       $('#outlineBtn').onclick = () => { saveCurrentNode(); renderMindmap(); els.outlineOverlay.classList.add('show'); requestAnimationFrame(centerMindmap); };
       $('#closeOutlineBtn').onclick = () => els.outlineOverlay.classList.remove('show'); $('#outlineCenterBtn').onclick = centerMindmap; $('#outlineFullBtn').onclick = () => toggleFullscreen(document.querySelector('.outline-shell'));
-      $('#focusEditBtn').onclick = () => toggleFullscreen(document.querySelector('.editor-card')); $('#focusPreviewBtn').onclick = () => toggleFullscreen(document.querySelector('.preview-card'));
+      $('#focusEditBtn').onclick = () => toggleFullscreen(document.querySelector('.editor-card')); $('#focusPreviewBtn').onclick = togglePreviewFocus;
       document.addEventListener('fullscreenchange', setPreviewFullscreenState);
       $('#exportAiBtn').onclick = exportAiKnowledge;
       $('#exportBtn').onclick = exportData; $('#importBtn').onclick = () => { els.importText.value=''; els.importMask.classList.add('show'); };
@@ -1600,7 +1948,15 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#pageSearchPrevBtn')?.addEventListener('click', () => goPageSearch(-1));
       $('#pageSearchNextBtn')?.addEventListener('click', () => goPageSearch(1));
       $('#pageSearchClearBtn')?.addEventListener('click', clearPageSearch);
-      document.addEventListener('click', e => { if(!els.searchResults.contains(e.target) && !els.globalSearch.contains(e.target)) els.searchResults.classList.remove('show'); });
+      document.addEventListener('click', e => {
+        if(!els.searchResults.contains(e.target) && !els.globalSearch.contains(e.target)) els.searchResults.classList.remove('show');
+        if (
+          els.annotationSettingsPanel
+          && !els.annotationSettingsPanel.hidden
+          && !els.annotationSettingsPanel.contains(e.target)
+          && !els.annotationSettingsBtn.contains(e.target)
+        ) els.annotationSettingsPanel.hidden = true;
+      });
       $('#toolbar').addEventListener('click', e => { const btn=e.target.closest('button'); if(!btn) return; if(btn.dataset.md) insertAtCursor(btn.dataset.md); if(btn.dataset.wrap) insertAtCursor(btn.dataset.wrap,true); if(btn.dataset.block) insertAtCursor(btn.dataset.block); });
       $('#imageBtn').onclick = () => $('#imageInput').click();
       $('#imageInput').onchange = e => { const file=e.target.files[0]; if(!file) return; const info = findNodeById(state.activeNodeId); if(!info) return; const reader=new FileReader(); reader.onload=()=>{ const id = addImageAsset(info.node, file.name, reader.result); insertAtCursor(`
@@ -1614,6 +1970,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       });
       document.addEventListener('keydown', e => {
         if(e.key === 'Escape' && els.htmlCenterMask.classList.contains('show')) closeHtmlCenter();
+        if(e.key === 'Escape' && els.annotationSettingsPanel && !els.annotationSettingsPanel.hidden) els.annotationSettingsPanel.hidden = true;
         if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){ e.preventDefault(); saveCurrentNode(); idbSet(DATA_KEY,state); showToast('已手动保存'); }
         if((e.ctrlKey||e.metaKey) && e.shiftKey && e.key.toLowerCase()==='f'){ e.preventDefault(); els.pageSearchInput?.focus(); return; }
         if(e.key === 'F3'){ e.preventDefault(); goPageSearch(e.shiftKey ? -1 : 1); return; }
