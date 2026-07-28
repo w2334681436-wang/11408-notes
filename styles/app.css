@@ -272,12 +272,21 @@
     .annotation-canvas {
       display: none;
       position: absolute;
-      inset: 0 auto auto 0;
+      top: 0;
+      left: 0;
       z-index: 6;
       pointer-events: none;
+      touch-action: pan-y pinch-zoom;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
     }
     .preview-card:fullscreen .annotation-canvas,
     .preview-card.is-preview-fullscreen .annotation-canvas { display: block; }
+    .preview-card.annotation-brush-enabled:fullscreen .annotation-canvas,
+    .preview-card.annotation-brush-enabled.is-preview-fullscreen .annotation-canvas {
+      pointer-events: auto;
+    }
     .preview-card.annotation-brush-enabled:fullscreen .preview-shell,
     .preview-card.annotation-brush-enabled.is-preview-fullscreen .preview-shell {
       cursor: crosshair;

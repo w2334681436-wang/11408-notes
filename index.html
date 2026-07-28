@@ -26,7 +26,7 @@
   <script>
     (function () {
       // 每次发布新版时只需要更新这里的版本号；不要每次打开都随机生成，否则 PWA/Service Worker 会反复重装并造成频闪。
-      const APP_VERSION = '20260727-stylus-v2';
+      const APP_VERSION = '20260728-stylus-engine-v3';
       window.__APP_VERSION__ = APP_VERSION;
       document.documentElement.setAttribute('data-app-version', APP_VERSION);
       const css = document.createElement('link');
@@ -189,8 +189,8 @@
             <div class="annotation-save-state" id="annotationSaveState">笔迹按小节自动保存</div>
           </div>
           <div class="preview-shell">
-            <article class="preview" id="preview"></article>
             <canvas class="annotation-canvas" id="annotationCanvas" aria-hidden="true"></canvas>
+            <article class="preview" id="preview"></article>
           </div>
         </div>
       </section>

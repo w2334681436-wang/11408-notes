@@ -175,9 +175,12 @@ assert.match(annotationJs, /event\.pointerType !== 'pen'/);
 assert.match(annotationJs, /node\.annotations/);
 assert.match(annotationJs, /idbSet\(DATA_KEY, state\)/);
 assert.match(annotationJs, /sanitizeAnnotationPoints/);
-assert.match(annotationJs, /clientX < shellRect\.left/);
-assert.match(annotationJs, /distance > maxContinuousJump/);
+assert.match(annotationJs, /event\.target === canvas/);
+assert.match(annotationJs, /badEdgeStart/);
+assert.match(annotationJs, /viewportHeight/);
+assert.doesNotMatch(annotationJs, /getCoalescedEvents/);
 assert.match(annotationCss, /\.annotation-canvas/);
+assert.match(annotationCss, /touch-action:\s*pan-y pinch-zoom/);
 
 console.log('Offline verification passed: app shell, navigation, scripts and MathJax work without network.');
 console.log('Stylus verification passed: pen detection, annotation canvas and IndexedDB persistence are present.');

@@ -32,8 +32,10 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       drawing: false,
       pointerId: null,
       currentStroke: null,
+      pendingStart: null,
       resizeObserver: null,
-      saveTimer: null
+      saveTimer: null,
+      viewportRaf: 0
     };
 
     const $ = s => document.querySelector(s);
@@ -133,7 +135,15 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     function annotationMetrics() {
-      return annotationState.metrics || { width: 1, height: 1, dpr: 1 };
+      return annotationState.metrics || {
+        viewportWidth: 1,
+        viewportHeight: 1,
+        documentWidth: 1,
+        documentHeight: 1,
+        scrollLeft: 0,
+        scrollTop: 0,
+        dpr: 1
+      };
     }
 
     function normalizeAnnotationPoint(point) {
@@ -147,19 +157,36 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       };
     }
 
+    function normalizedAnnotationDistance(first, second) {
+      return Math.hypot(second.x - first.x, second.y - first.y);
+    }
+
+    function isAnnotationDocumentEdge(point) {
+      return point.x <= 0.0015 || point.x >= 0.9985 || point.y <= 0.0015 || point.y >= 0.9985;
+    }
+
     function sanitizeAnnotationPoints(points) {
-      const normalized = (Array.isArray(points) ? points : [])
+      let cleaned = (Array.isArray(points) ? points : [])
         .slice(0, 12000)
         .map(normalizeAnnotationPoint)
         .filter(Boolean);
-      return normalized.filter((point, index) => {
-        if (point.x > 0.0005 || point.y > 0.0005) return true;
-        const previous = normalized[index - 1];
-        const next = normalized[index + 1];
-        const neighbor = previous || next;
-        if (!neighbor) return false;
-        return Math.hypot(neighbor.x - point.x, neighbor.y - point.y) < 0.02;
-      });
+      for (let pass = 0; pass < 8 && cleaned.length > 1; pass++) {
+        let changed = false;
+        const next = cleaned.filter((point, index) => {
+          if (!isAnnotationDocumentEdge(point)) return true;
+          const previous = cleaned[index - 1];
+          const following = cleaned[index + 1];
+          const hasImpossibleNeighbor = (
+            (previous && normalizedAnnotationDistance(previous, point) > 0.08)
+            || (following && normalizedAnnotationDistance(point, following) > 0.08)
+          );
+          if (hasImpossibleNeighbor) changed = true;
+          return !hasImpossibleNeighbor;
+        });
+        cleaned = next;
+        if (!changed) break;
+      }
+      return cleaned;
     }
 
     function normalizeNodeAnnotations(node) {
@@ -176,27 +203,47 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         .filter(stroke => stroke.points.length);
     }
 
-    function drawAnnotationDot(ctx, point, stroke, width, height) {
+    function annotationViewportPoint(point, metrics = annotationMetrics()) {
+      return {
+        x: point.x * metrics.documentWidth - metrics.scrollLeft,
+        y: point.y * metrics.documentHeight - metrics.scrollTop,
+        pressure: point.pressure
+      };
+    }
+
+    function annotationPointIsNearViewport(point, metrics, margin = 24) {
+      return point.x >= -margin
+        && point.x <= metrics.viewportWidth + margin
+        && point.y >= -margin
+        && point.y <= metrics.viewportHeight + margin;
+    }
+
+    function drawAnnotationDot(ctx, point, stroke, metrics) {
+      const viewportPoint = annotationViewportPoint(point, metrics);
+      if (!annotationPointIsNearViewport(viewportPoint, metrics)) return;
       const pressure = Math.min(1, Math.max(0.05, Number(point.pressure) || 0.5));
       const radius = Math.max(0.75, stroke.size * (0.35 + pressure * 0.35));
       ctx.beginPath();
-      ctx.arc(point.x * width, point.y * height, radius, 0, Math.PI * 2);
+      ctx.arc(viewportPoint.x, viewportPoint.y, radius, 0, Math.PI * 2);
       ctx.fillStyle = stroke.color;
       ctx.fill();
     }
 
-    function drawAnnotationSegment(ctx, stroke, index, width, height) {
+    function drawAnnotationSegment(ctx, stroke, index, metrics) {
       const current = stroke.points[index];
       if (!current) return;
       if (index === 0) {
-        drawAnnotationDot(ctx, current, stroke, width, height);
+        drawAnnotationDot(ctx, current, stroke, metrics);
         return;
       }
       const previous = stroke.points[index - 1];
+      const from = annotationViewportPoint(previous, metrics);
+      const to = annotationViewportPoint(current, metrics);
+      if (!annotationPointIsNearViewport(from, metrics) && !annotationPointIsNearViewport(to, metrics)) return;
       const pressure = (Number(previous.pressure) + Number(current.pressure)) / 2 || 0.5;
       ctx.beginPath();
-      ctx.moveTo(previous.x * width, previous.y * height);
-      ctx.lineTo(current.x * width, current.y * height);
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
       ctx.strokeStyle = stroke.color;
       ctx.lineWidth = Math.max(1, stroke.size * (0.55 + pressure * 0.75));
       ctx.lineCap = 'round';
@@ -211,12 +258,17 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
-      ctx.clearRect(0, 0, metrics.width, metrics.height);
+      ctx.clearRect(0, 0, metrics.viewportWidth, metrics.viewportHeight);
       const info = findNodeById(state.activeNodeId);
-      const strokes = ensureNodeAnnotations(info?.node);
+      const savedStrokes = ensureNodeAnnotations(info?.node);
+      const strokes = (
+        annotationState.drawing
+        && annotationState.currentStroke
+        && !savedStrokes.includes(annotationState.currentStroke)
+      ) ? savedStrokes.concat(annotationState.currentStroke) : savedStrokes;
       strokes.forEach(stroke => {
         for (let index = 0; index < stroke.points.length; index++) {
-          drawAnnotationSegment(ctx, stroke, index, metrics.width, metrics.height);
+          drawAnnotationSegment(ctx, stroke, index, metrics);
         }
       });
     }
@@ -225,43 +277,147 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       const canvas = els.annotationCanvas;
       const shell = getPreviewShell();
       if (!canvas || !shell) return;
-      const width = Math.max(1, shell.clientWidth);
-      const height = Math.max(1, shell.clientHeight, els.preview?.offsetHeight || 0, els.preview?.scrollHeight || 0);
+      const viewportWidth = Math.max(1, shell.clientWidth);
+      const viewportHeight = Math.max(1, shell.clientHeight);
+      const documentWidth = Math.max(viewportWidth, shell.scrollWidth || 0, els.preview?.scrollWidth || 0);
+      const documentHeight = Math.max(viewportHeight, shell.scrollHeight || 0, els.preview?.offsetHeight || 0, els.preview?.scrollHeight || 0);
+      const scrollLeft = Math.max(0, shell.scrollLeft || 0);
+      const scrollTop = Math.max(0, shell.scrollTop || 0);
       const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
-      const pixelWidth = Math.round(width * dpr);
-      const pixelHeight = Math.round(height * dpr);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
+      const pixelWidth = Math.round(viewportWidth * dpr);
+      const pixelHeight = Math.round(viewportHeight * dpr);
+      canvas.style.left = `${scrollLeft}px`;
+      canvas.style.top = `${scrollTop}px`;
+      canvas.style.width = `${viewportWidth}px`;
+      canvas.style.height = `${viewportHeight}px`;
       if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
       if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
-      annotationState.metrics = { width, height, dpr };
+      annotationState.metrics = {
+        viewportWidth,
+        viewportHeight,
+        documentWidth,
+        documentHeight,
+        scrollLeft,
+        scrollTop,
+        dpr
+      };
       redrawAnnotationCanvas();
+    }
+
+    function scheduleAnnotationViewportRefresh() {
+      cancelAnimationFrame(annotationState.viewportRaf);
+      annotationState.viewportRaf = requestAnimationFrame(refreshAnnotationCanvas);
     }
 
     function annotationPointFromEvent(event) {
       const canvas = els.annotationCanvas;
       const metrics = annotationMetrics();
-      const shell = getPreviewShell();
-      const clientX = Number(event?.clientX);
-      const clientY = Number(event?.clientY);
-      if (!canvas || !shell || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
-      const shellRect = shell.getBoundingClientRect();
-      const edgeTolerance = 8;
-      if (
-        clientX < shellRect.left - edgeTolerance
-        || clientX > shellRect.right + edgeTolerance
-        || clientY < shellRect.top - edgeTolerance
-        || clientY > shellRect.bottom + edgeTolerance
-      ) return null;
+      if (!canvas || event?.pointerType !== 'pen') return null;
       const rect = canvas.getBoundingClientRect();
-      const x = (clientX - rect.left) / metrics.width;
-      const y = (clientY - rect.top) / metrics.height;
-      if (x < -0.01 || x > 1.01 || y < -0.01 || y > 1.01) return null;
-      return normalizeAnnotationPoint({
-        x,
-        y,
+      const offsetX = Number(event.offsetX);
+      const offsetY = Number(event.offsetY);
+      const clientX = Number(event.clientX);
+      const clientY = Number(event.clientY);
+      const offsetCandidateValid = (
+        event.target === canvas
+        && Number.isFinite(offsetX)
+        && Number.isFinite(offsetY)
+        && offsetX >= -4
+        && offsetX <= metrics.viewportWidth + 4
+        && offsetY >= -4
+        && offsetY <= metrics.viewportHeight + 4
+      );
+      const clientCandidateX = clientX - rect.left;
+      const clientCandidateY = clientY - rect.top;
+      const clientCandidateValid = (
+        Number.isFinite(clientCandidateX)
+        && Number.isFinite(clientCandidateY)
+        && clientCandidateX >= -4
+        && clientCandidateX <= metrics.viewportWidth + 4
+        && clientCandidateY >= -4
+        && clientCandidateY <= metrics.viewportHeight + 4
+      );
+      if (!offsetCandidateValid && !clientCandidateValid) return null;
+      const viewportX = offsetCandidateValid ? offsetX : clientCandidateX;
+      const viewportY = offsetCandidateValid ? offsetY : clientCandidateY;
+      const point = normalizeAnnotationPoint({
+        x: (metrics.scrollLeft + viewportX) / metrics.documentWidth,
+        y: (metrics.scrollTop + viewportY) / metrics.documentHeight,
         pressure: event.pressure > 0 ? event.pressure : 0.5
       });
+      return point ? { ...point, viewportX, viewportY } : null;
+    }
+
+    function annotationSampleDistance(first, second) {
+      const metrics = annotationMetrics();
+      return Math.hypot(
+        (second.x - first.x) * metrics.documentWidth,
+        (second.y - first.y) * metrics.documentHeight
+      );
+    }
+
+    function annotationSampleIsOnViewportEdge(sample) {
+      const metrics = annotationMetrics();
+      const margin = 3;
+      return sample.viewportX <= margin
+        || sample.viewportX >= metrics.viewportWidth - margin
+        || sample.viewportY <= margin
+        || sample.viewportY >= metrics.viewportHeight - margin;
+    }
+
+    function isImpossibleAnnotationJump(first, second) {
+      const metrics = annotationMetrics();
+      const distance = annotationSampleDistance(first, second);
+      const maxContinuousJump = Math.max(
+        160,
+        Math.min(300, Math.min(metrics.viewportWidth, metrics.viewportHeight) * 0.32)
+      );
+      return distance > maxContinuousJump;
+    }
+
+    function appendAnnotationSample(sample) {
+      const stroke = annotationState.currentStroke;
+      if (!stroke || !sample || stroke.points.length >= 12000) return false;
+      const previous = stroke.points[stroke.points.length - 1];
+      if (previous) {
+        const distance = annotationSampleDistance(previous, sample);
+        if (distance < 0.45) return false;
+        if (isImpossibleAnnotationJump(previous, sample)) return false;
+      }
+      stroke.points.push({
+        x: sample.x,
+        y: sample.y,
+        pressure: sample.pressure
+      });
+      const canvas = els.annotationCanvas;
+      const metrics = annotationMetrics();
+      const ctx = canvas?.getContext('2d');
+      if (ctx) {
+        ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+        drawAnnotationSegment(ctx, stroke, stroke.points.length - 1, metrics);
+      }
+      return true;
+    }
+
+    function appendAnnotationEvent(event, phase = 'move') {
+      const sample = annotationPointFromEvent(event);
+      if (!sample) return false;
+      const stroke = annotationState.currentStroke;
+      if (!stroke) return false;
+      if (!stroke.points.length && annotationState.pendingStart) {
+        const pending = annotationState.pendingStart;
+        const badEdgeStart = annotationSampleIsOnViewportEdge(pending) && isImpossibleAnnotationJump(pending, sample);
+        if (!badEdgeStart) appendAnnotationSample(pending);
+        annotationState.pendingStart = null;
+      }
+      if (phase === 'down' && !stroke.points.length) {
+        annotationState.pendingStart = sample;
+        return true;
+      }
+      if (stroke.points.length && annotationSampleIsOnViewportEdge(sample) && isImpossibleAnnotationJump(stroke.points[stroke.points.length - 1], sample)) {
+        return false;
+      }
+      return appendAnnotationSample(sample);
     }
 
     function updateAnnotationControls() {
@@ -296,29 +452,6 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       return Promise.resolve();
     }
 
-    function appendAnnotationEvent(event) {
-      const stroke = annotationState.currentStroke;
-      if (!stroke || stroke.points.length >= 12000) return;
-      const point = annotationPointFromEvent(event);
-      if (!point) return;
-      const previous = stroke.points[stroke.points.length - 1];
-      const metrics = annotationMetrics();
-      if (previous) {
-        const distance = Math.hypot(
-          (point.x - previous.x) * metrics.width,
-          (point.y - previous.y) * metrics.height
-        );
-        if (distance < 0.45) return;
-        const maxContinuousJump = Math.max(180, Math.min(320, Math.min(metrics.width, metrics.height) * 0.28));
-        if (distance > maxContinuousJump) return;
-      }
-      stroke.points.push(point);
-      const ctx = els.annotationCanvas?.getContext('2d');
-      if (!ctx) return;
-      ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
-      drawAnnotationSegment(ctx, stroke, stroke.points.length - 1, metrics.width, metrics.height);
-    }
-
     function startStylusStroke(event) {
       const settings = getAnnotationSettings();
       if (!settings.enabled || !isPreviewFocusActive() || event.pointerType !== 'pen') return;
@@ -327,53 +460,60 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       event.preventDefault();
       refreshAnnotationCanvas();
       const stroke = { color: settings.color, size: settings.size, points: [] };
-      ensureNodeAnnotations(info.node).push(stroke);
       annotationState.drawing = true;
       annotationState.pointerId = event.pointerId;
       annotationState.currentStroke = stroke;
-      getPreviewShell()?.setPointerCapture?.(event.pointerId);
-      appendAnnotationEvent(event);
+      annotationState.pendingStart = null;
+      appendAnnotationEvent(event, 'down');
       setAnnotationSaveState('正在书写…');
     }
 
     function moveStylusStroke(event) {
       if (!annotationState.drawing || event.pointerId !== annotationState.pointerId || event.pointerType !== 'pen') return;
       event.preventDefault();
-      const coalesced = event.getCoalescedEvents?.() || [];
-      coalesced.forEach(appendAnnotationEvent);
-      appendAnnotationEvent(event);
+      appendAnnotationEvent(event, 'move');
     }
 
     function finishStylusStroke(event) {
       if (!annotationState.drawing || event.pointerId !== annotationState.pointerId) return;
       if (event.pointerType === 'pen') {
         event.preventDefault();
-        appendAnnotationEvent(event);
+        appendAnnotationEvent(event, 'up');
       }
-      getPreviewShell()?.releasePointerCapture?.(event.pointerId);
+      if (!annotationState.currentStroke?.points.length && annotationState.pendingStart) {
+        appendAnnotationSample(annotationState.pendingStart);
+      }
+      const info = findNodeById(state.activeNodeId);
+      if (info && annotationState.currentStroke?.points.length) {
+        ensureNodeAnnotations(info.node).push(annotationState.currentStroke);
+      }
       annotationState.drawing = false;
       annotationState.pointerId = null;
       annotationState.currentStroke = null;
-      persistAnnotations();
+      annotationState.pendingStart = null;
+      redrawAnnotationCanvas();
+      if (info) persistAnnotations();
     }
 
     function bindAnnotationCanvas() {
       const shell = getPreviewShell();
-      if (!shell || shell.dataset.annotationBound) return;
-      shell.dataset.annotationBound = '1';
-      shell.addEventListener('pointerdown', startStylusStroke, { passive: false });
-      shell.addEventListener('pointermove', moveStylusStroke, { passive: false });
-      shell.addEventListener('pointerup', finishStylusStroke, { passive: false });
-      shell.addEventListener('pointercancel', finishStylusStroke, { passive: false });
+      const canvas = els.annotationCanvas;
+      if (!shell || !canvas || canvas.dataset.annotationBound) return;
+      canvas.dataset.annotationBound = '1';
+      canvas.addEventListener('pointerdown', startStylusStroke, { passive: false });
+      canvas.addEventListener('pointermove', moveStylusStroke, { passive: false });
+      window.addEventListener('pointerup', finishStylusStroke, { passive: false });
+      window.addEventListener('pointercancel', finishStylusStroke, { passive: false });
+      shell.addEventListener('scroll', scheduleAnnotationViewportRefresh, { passive: true });
       if ('ResizeObserver' in window) {
         annotationState.resizeObserver?.disconnect?.();
         annotationState.resizeObserver = new ResizeObserver(() => {
-          if (isPreviewFocusActive()) requestAnimationFrame(refreshAnnotationCanvas);
+          if (isPreviewFocusActive()) scheduleAnnotationViewportRefresh();
         });
         annotationState.resizeObserver.observe(shell);
         if (els.preview) annotationState.resizeObserver.observe(els.preview);
       } else {
-        window.addEventListener('resize', refreshAnnotationCanvas, { passive: true });
+        window.addEventListener('resize', scheduleAnnotationViewportRefresh, { passive: true });
       }
       updateAnnotationControls();
     }
