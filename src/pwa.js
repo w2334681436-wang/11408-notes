@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260728-stylus-engine-v3';
+  const version = window.__APP_VERSION__ || '20260729-clean-v4';
   const statusEl = document.getElementById('offlineStatus');
   const installBtn = document.getElementById('installAppBtn');
   let deferredInstallPrompt = null;

@@ -28,15 +28,6 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let scrollSyncState = { lock: false, raf: 0 };
     let pdfRenderNodeId = null;
     let previewFallbackFocus = false;
-    let annotationState = {
-      drawing: false,
-      pointerId: null,
-      currentStroke: null,
-      pendingStart: null,
-      resizeObserver: null,
-      saveTimer: null,
-      viewportRaf: 0
-    };
 
     const $ = s => document.querySelector(s);
     const els = {
@@ -48,15 +39,11 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       modalMask: $('#modalMask'), modalTitle: $('#modalTitle'), modalInput: $('#modalInput'),
       importMask: $('#importMask'), importText: $('#importText'),
       htmlCenterMask: $('#htmlCenterMask'), htmlCenterPanel: $('#htmlCenterPanel'), htmlCenterFrame: $('#htmlCenterFrame'),
-      annotationCanvas: $('#annotationCanvas'), annotationSettingsPanel: $('#annotationSettingsPanel'),
-      annotationSettingsBtn: $('#annotationSettingsBtn'), annotationEnabledInput: $('#annotationEnabledInput'),
-      annotationColorInput: $('#annotationColorInput'), annotationSizeInput: $('#annotationSizeInput'),
-      annotationSizeValue: $('#annotationSizeValue'), annotationSaveState: $('#annotationSaveState'),
       toast: $('#toast')
     };
 
     function uid(prefix='n') { return prefix + '_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
-    function createNode(title, level=1, md='') { return { id: uid(), title, level, md, html: '', assets: [], annotations: [], children: [], createdAt: Date.now(), updatedAt: Date.now() }; }
+    function createNode(title, level=1, md='') { return { id: uid(), title, level, md, html: '', assets: [], children: [], createdAt: Date.now(), updatedAt: Date.now() }; }
 
     function defaultData() {
       const subjects = SUBJECTS.map(s => ({ ...s, nodes: [] }));
@@ -111,438 +98,6 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     function getImageAsset(node, id) {
       const assets = ensureNodeAssets(node);
       return assets.find(asset => asset.id === id);
-    }
-
-    function ensureNodeAnnotations(node) {
-      if (!node) return [];
-      if (!Array.isArray(node.annotations)) node.annotations = [];
-      return node.annotations;
-    }
-
-    function getAnnotationSettings() {
-      const raw = state.annotationSettings && typeof state.annotationSettings === 'object'
-        ? state.annotationSettings
-        : {};
-      const color = /^#[0-9a-f]{6}$/i.test(String(raw.color || '')) ? String(raw.color) : '#ef4444';
-      const size = Math.min(16, Math.max(1, Number(raw.size) || 4));
-      state.annotationSettings = { enabled: raw.enabled !== false, color, size };
-      return state.annotationSettings;
-    }
-
-    function isPreviewFocusActive() {
-      const card = document.querySelector('.preview-card');
-      return !!card && (document.fullscreenElement === card || card.classList.contains('is-preview-fullscreen'));
-    }
-
-    function annotationMetrics() {
-      return annotationState.metrics || {
-        viewportWidth: 1,
-        viewportHeight: 1,
-        documentWidth: 1,
-        documentHeight: 1,
-        scrollLeft: 0,
-        scrollTop: 0,
-        dpr: 1
-      };
-    }
-
-    function normalizeAnnotationPoint(point) {
-      const x = Number(point?.x);
-      const y = Number(point?.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-      return {
-        x: Math.min(1, Math.max(0, x)),
-        y: Math.min(1, Math.max(0, y)),
-        pressure: Math.min(1, Math.max(0.05, Number(point?.pressure) || 0.5))
-      };
-    }
-
-    function normalizedAnnotationDistance(first, second) {
-      return Math.hypot(second.x - first.x, second.y - first.y);
-    }
-
-    function isAnnotationDocumentEdge(point) {
-      return point.x <= 0.0015 || point.x >= 0.9985 || point.y <= 0.0015 || point.y >= 0.9985;
-    }
-
-    function sanitizeAnnotationPoints(points) {
-      let cleaned = (Array.isArray(points) ? points : [])
-        .slice(0, 12000)
-        .map(normalizeAnnotationPoint)
-        .filter(Boolean);
-      for (let pass = 0; pass < 8 && cleaned.length > 1; pass++) {
-        let changed = false;
-        const next = cleaned.filter((point, index) => {
-          if (!isAnnotationDocumentEdge(point)) return true;
-          const previous = cleaned[index - 1];
-          const following = cleaned[index + 1];
-          const hasImpossibleNeighbor = (
-            (previous && normalizedAnnotationDistance(previous, point) > 0.08)
-            || (following && normalizedAnnotationDistance(point, following) > 0.08)
-          );
-          if (hasImpossibleNeighbor) changed = true;
-          return !hasImpossibleNeighbor;
-        });
-        cleaned = next;
-        if (!changed) break;
-      }
-      return cleaned;
-    }
-
-    function normalizeNodeAnnotations(node) {
-      if (!node) return;
-      const strokes = Array.isArray(node.annotations) ? node.annotations : [];
-      node.annotations = strokes
-        .filter(stroke => stroke && Array.isArray(stroke.points) && stroke.points.length)
-        .slice(-2000)
-        .map(stroke => ({
-          color: /^#[0-9a-f]{6}$/i.test(String(stroke.color || '')) ? String(stroke.color) : '#ef4444',
-          size: Math.min(16, Math.max(1, Number(stroke.size) || 4)),
-          points: sanitizeAnnotationPoints(stroke.points)
-        }))
-        .filter(stroke => stroke.points.length);
-    }
-
-    function annotationViewportPoint(point, metrics = annotationMetrics()) {
-      return {
-        x: point.x * metrics.documentWidth - metrics.scrollLeft,
-        y: point.y * metrics.documentHeight - metrics.scrollTop,
-        pressure: point.pressure
-      };
-    }
-
-    function annotationPointIsNearViewport(point, metrics, margin = 24) {
-      return point.x >= -margin
-        && point.x <= metrics.viewportWidth + margin
-        && point.y >= -margin
-        && point.y <= metrics.viewportHeight + margin;
-    }
-
-    function drawAnnotationDot(ctx, point, stroke, metrics) {
-      const viewportPoint = annotationViewportPoint(point, metrics);
-      if (!annotationPointIsNearViewport(viewportPoint, metrics)) return;
-      const pressure = Math.min(1, Math.max(0.05, Number(point.pressure) || 0.5));
-      const radius = Math.max(0.75, stroke.size * (0.35 + pressure * 0.35));
-      ctx.beginPath();
-      ctx.arc(viewportPoint.x, viewportPoint.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = stroke.color;
-      ctx.fill();
-    }
-
-    function drawAnnotationSegment(ctx, stroke, index, metrics) {
-      const current = stroke.points[index];
-      if (!current) return;
-      if (index === 0) {
-        drawAnnotationDot(ctx, current, stroke, metrics);
-        return;
-      }
-      const previous = stroke.points[index - 1];
-      const from = annotationViewportPoint(previous, metrics);
-      const to = annotationViewportPoint(current, metrics);
-      if (!annotationPointIsNearViewport(from, metrics) && !annotationPointIsNearViewport(to, metrics)) return;
-      const pressure = (Number(previous.pressure) + Number(current.pressure)) / 2 || 0.5;
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
-      ctx.strokeStyle = stroke.color;
-      ctx.lineWidth = Math.max(1, stroke.size * (0.55 + pressure * 0.75));
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.stroke();
-    }
-
-    function redrawAnnotationCanvas() {
-      const canvas = els.annotationCanvas;
-      if (!canvas) return;
-      const metrics = annotationMetrics();
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
-      ctx.clearRect(0, 0, metrics.viewportWidth, metrics.viewportHeight);
-      const info = findNodeById(state.activeNodeId);
-      const savedStrokes = ensureNodeAnnotations(info?.node);
-      const strokes = (
-        annotationState.drawing
-        && annotationState.currentStroke
-        && !savedStrokes.includes(annotationState.currentStroke)
-      ) ? savedStrokes.concat(annotationState.currentStroke) : savedStrokes;
-      strokes.forEach(stroke => {
-        for (let index = 0; index < stroke.points.length; index++) {
-          drawAnnotationSegment(ctx, stroke, index, metrics);
-        }
-      });
-    }
-
-    function refreshAnnotationCanvas() {
-      const canvas = els.annotationCanvas;
-      const shell = getPreviewShell();
-      if (!canvas || !shell) return;
-      const viewportWidth = Math.max(1, shell.clientWidth);
-      const viewportHeight = Math.max(1, shell.clientHeight);
-      const documentWidth = Math.max(viewportWidth, shell.scrollWidth || 0, els.preview?.scrollWidth || 0);
-      const documentHeight = Math.max(viewportHeight, shell.scrollHeight || 0, els.preview?.offsetHeight || 0, els.preview?.scrollHeight || 0);
-      const scrollLeft = Math.max(0, shell.scrollLeft || 0);
-      const scrollTop = Math.max(0, shell.scrollTop || 0);
-      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
-      const pixelWidth = Math.round(viewportWidth * dpr);
-      const pixelHeight = Math.round(viewportHeight * dpr);
-      canvas.style.left = `${scrollLeft}px`;
-      canvas.style.top = `${scrollTop}px`;
-      canvas.style.width = `${viewportWidth}px`;
-      canvas.style.height = `${viewportHeight}px`;
-      if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
-      if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
-      annotationState.metrics = {
-        viewportWidth,
-        viewportHeight,
-        documentWidth,
-        documentHeight,
-        scrollLeft,
-        scrollTop,
-        dpr
-      };
-      redrawAnnotationCanvas();
-    }
-
-    function scheduleAnnotationViewportRefresh() {
-      cancelAnimationFrame(annotationState.viewportRaf);
-      annotationState.viewportRaf = requestAnimationFrame(refreshAnnotationCanvas);
-    }
-
-    function annotationPointFromEvent(event) {
-      const canvas = els.annotationCanvas;
-      const metrics = annotationMetrics();
-      if (!canvas || event?.pointerType !== 'pen') return null;
-      const rect = canvas.getBoundingClientRect();
-      const offsetX = Number(event.offsetX);
-      const offsetY = Number(event.offsetY);
-      const clientX = Number(event.clientX);
-      const clientY = Number(event.clientY);
-      const offsetCandidateValid = (
-        event.target === canvas
-        && Number.isFinite(offsetX)
-        && Number.isFinite(offsetY)
-        && offsetX >= -4
-        && offsetX <= metrics.viewportWidth + 4
-        && offsetY >= -4
-        && offsetY <= metrics.viewportHeight + 4
-      );
-      const clientCandidateX = clientX - rect.left;
-      const clientCandidateY = clientY - rect.top;
-      const clientCandidateValid = (
-        Number.isFinite(clientCandidateX)
-        && Number.isFinite(clientCandidateY)
-        && clientCandidateX >= -4
-        && clientCandidateX <= metrics.viewportWidth + 4
-        && clientCandidateY >= -4
-        && clientCandidateY <= metrics.viewportHeight + 4
-      );
-      if (!offsetCandidateValid && !clientCandidateValid) return null;
-      const viewportX = offsetCandidateValid ? offsetX : clientCandidateX;
-      const viewportY = offsetCandidateValid ? offsetY : clientCandidateY;
-      const point = normalizeAnnotationPoint({
-        x: (metrics.scrollLeft + viewportX) / metrics.documentWidth,
-        y: (metrics.scrollTop + viewportY) / metrics.documentHeight,
-        pressure: event.pressure > 0 ? event.pressure : 0.5
-      });
-      return point ? { ...point, viewportX, viewportY } : null;
-    }
-
-    function annotationSampleDistance(first, second) {
-      const metrics = annotationMetrics();
-      return Math.hypot(
-        (second.x - first.x) * metrics.documentWidth,
-        (second.y - first.y) * metrics.documentHeight
-      );
-    }
-
-    function annotationSampleIsOnViewportEdge(sample) {
-      const metrics = annotationMetrics();
-      const margin = 3;
-      return sample.viewportX <= margin
-        || sample.viewportX >= metrics.viewportWidth - margin
-        || sample.viewportY <= margin
-        || sample.viewportY >= metrics.viewportHeight - margin;
-    }
-
-    function isImpossibleAnnotationJump(first, second) {
-      const metrics = annotationMetrics();
-      const distance = annotationSampleDistance(first, second);
-      const maxContinuousJump = Math.max(
-        160,
-        Math.min(300, Math.min(metrics.viewportWidth, metrics.viewportHeight) * 0.32)
-      );
-      return distance > maxContinuousJump;
-    }
-
-    function appendAnnotationSample(sample) {
-      const stroke = annotationState.currentStroke;
-      if (!stroke || !sample || stroke.points.length >= 12000) return false;
-      const previous = stroke.points[stroke.points.length - 1];
-      if (previous) {
-        const distance = annotationSampleDistance(previous, sample);
-        if (distance < 0.45) return false;
-        if (isImpossibleAnnotationJump(previous, sample)) return false;
-      }
-      stroke.points.push({
-        x: sample.x,
-        y: sample.y,
-        pressure: sample.pressure
-      });
-      const canvas = els.annotationCanvas;
-      const metrics = annotationMetrics();
-      const ctx = canvas?.getContext('2d');
-      if (ctx) {
-        ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
-        drawAnnotationSegment(ctx, stroke, stroke.points.length - 1, metrics);
-      }
-      return true;
-    }
-
-    function appendAnnotationEvent(event, phase = 'move') {
-      const sample = annotationPointFromEvent(event);
-      if (!sample) return false;
-      const stroke = annotationState.currentStroke;
-      if (!stroke) return false;
-      if (!stroke.points.length && annotationState.pendingStart) {
-        const pending = annotationState.pendingStart;
-        const badEdgeStart = annotationSampleIsOnViewportEdge(pending) && isImpossibleAnnotationJump(pending, sample);
-        if (!badEdgeStart) appendAnnotationSample(pending);
-        annotationState.pendingStart = null;
-      }
-      if (phase === 'down' && !stroke.points.length) {
-        annotationState.pendingStart = sample;
-        return true;
-      }
-      if (stroke.points.length && annotationSampleIsOnViewportEdge(sample) && isImpossibleAnnotationJump(stroke.points[stroke.points.length - 1], sample)) {
-        return false;
-      }
-      return appendAnnotationSample(sample);
-    }
-
-    function updateAnnotationControls() {
-      const settings = getAnnotationSettings();
-      if (els.annotationEnabledInput) els.annotationEnabledInput.checked = settings.enabled;
-      if (els.annotationColorInput) els.annotationColorInput.value = settings.color;
-      if (els.annotationSizeInput) els.annotationSizeInput.value = String(settings.size);
-      if (els.annotationSizeValue) els.annotationSizeValue.textContent = `${settings.size} px`;
-      const card = document.querySelector('.preview-card');
-      card?.classList.toggle('annotation-brush-enabled', settings.enabled);
-      els.annotationSettingsBtn?.classList.toggle('active', settings.enabled);
-      els.annotationSettingsBtn?.setAttribute('title', settings.enabled ? '手写标记已开启' : '手写标记已关闭');
-    }
-
-    function setAnnotationSaveState(text) {
-      if (els.annotationSaveState) els.annotationSaveState.textContent = text;
-    }
-
-    function persistAnnotations(immediate = false) {
-      clearTimeout(annotationState.saveTimer);
-      setAnnotationSaveState('正在保存笔迹…');
-      const save = async () => {
-        try {
-          await idbSet(DATA_KEY, state);
-          setAnnotationSaveState(`已保存 · ${new Date().toLocaleTimeString()}`);
-        } catch (error) {
-          setAnnotationSaveState('保存失败，请重试');
-        }
-      };
-      if (immediate) return save();
-      annotationState.saveTimer = setTimeout(save, 220);
-      return Promise.resolve();
-    }
-
-    function startStylusStroke(event) {
-      const settings = getAnnotationSettings();
-      if (!settings.enabled || !isPreviewFocusActive() || event.pointerType !== 'pen') return;
-      const info = findNodeById(state.activeNodeId);
-      if (!info) return;
-      event.preventDefault();
-      refreshAnnotationCanvas();
-      const stroke = { color: settings.color, size: settings.size, points: [] };
-      annotationState.drawing = true;
-      annotationState.pointerId = event.pointerId;
-      annotationState.currentStroke = stroke;
-      annotationState.pendingStart = null;
-      appendAnnotationEvent(event, 'down');
-      setAnnotationSaveState('正在书写…');
-    }
-
-    function moveStylusStroke(event) {
-      if (!annotationState.drawing || event.pointerId !== annotationState.pointerId || event.pointerType !== 'pen') return;
-      event.preventDefault();
-      appendAnnotationEvent(event, 'move');
-    }
-
-    function finishStylusStroke(event) {
-      if (!annotationState.drawing || event.pointerId !== annotationState.pointerId) return;
-      if (event.pointerType === 'pen') {
-        event.preventDefault();
-        appendAnnotationEvent(event, 'up');
-      }
-      if (!annotationState.currentStroke?.points.length && annotationState.pendingStart) {
-        appendAnnotationSample(annotationState.pendingStart);
-      }
-      const info = findNodeById(state.activeNodeId);
-      if (info && annotationState.currentStroke?.points.length) {
-        ensureNodeAnnotations(info.node).push(annotationState.currentStroke);
-      }
-      annotationState.drawing = false;
-      annotationState.pointerId = null;
-      annotationState.currentStroke = null;
-      annotationState.pendingStart = null;
-      redrawAnnotationCanvas();
-      if (info) persistAnnotations();
-    }
-
-    function bindAnnotationCanvas() {
-      const shell = getPreviewShell();
-      const canvas = els.annotationCanvas;
-      if (!shell || !canvas || canvas.dataset.annotationBound) return;
-      canvas.dataset.annotationBound = '1';
-      canvas.addEventListener('pointerdown', startStylusStroke, { passive: false });
-      canvas.addEventListener('pointermove', moveStylusStroke, { passive: false });
-      window.addEventListener('pointerup', finishStylusStroke, { passive: false });
-      window.addEventListener('pointercancel', finishStylusStroke, { passive: false });
-      shell.addEventListener('scroll', scheduleAnnotationViewportRefresh, { passive: true });
-      if ('ResizeObserver' in window) {
-        annotationState.resizeObserver?.disconnect?.();
-        annotationState.resizeObserver = new ResizeObserver(() => {
-          if (isPreviewFocusActive()) scheduleAnnotationViewportRefresh();
-        });
-        annotationState.resizeObserver.observe(shell);
-        if (els.preview) annotationState.resizeObserver.observe(els.preview);
-      } else {
-        window.addEventListener('resize', scheduleAnnotationViewportRefresh, { passive: true });
-      }
-      updateAnnotationControls();
-    }
-
-    function undoAnnotationStroke() {
-      const info = findNodeById(state.activeNodeId);
-      const strokes = ensureNodeAnnotations(info?.node);
-      if (!strokes.length) {
-        showToast('当前小节还没有手写标记');
-        return;
-      }
-      strokes.pop();
-      redrawAnnotationCanvas();
-      persistAnnotations();
-      showToast('已撤销上一笔');
-    }
-
-    function clearAnnotationStrokes() {
-      const info = findNodeById(state.activeNodeId);
-      const strokes = ensureNodeAnnotations(info?.node);
-      if (!strokes.length) {
-        showToast('当前小节还没有手写标记');
-        return;
-      }
-      if (!confirm('确定清空当前小节的全部手写标记吗？')) return;
-      info.node.annotations = [];
-      redrawAnnotationCanvas();
-      persistAnnotations();
-      showToast('已清空当前小节的手写标记');
     }
 
     function shortImageLabel(name) {
@@ -814,7 +369,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       }
     }
 
-    function renderAll() { applyMode(); renderSubjects(); renderTree(); renderEditor(); bindScrollSync(); bindAnnotationCanvas(); runSearch(); updateHtmlGlobalButton(); updateAnnotationControls(); }
+    function renderAll() { applyMode(); renderSubjects(); renderTree(); renderEditor(); bindScrollSync(); runSearch(); updateHtmlGlobalButton(); }
 
     function renderSubjects() {
       els.subjectList.innerHTML = '';
@@ -857,7 +412,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       ['addSiblingBtn','addChildBtn','deleteNodeBtn','moveUpBtn','moveDownBtn','prevBtn','nextBtn'].forEach(id => $('#' + id).disabled = !hasNode);
       if (!hasNode) {
         els.breadcrumb.textContent = '请选择或创建一个小节'; els.titleInput.value = ''; els.mdEditor.value = ''; els.htmlEditor.value = '';
-        els.preview.innerHTML = '<div class="empty"><div><h2>还没有选择小节</h2><p>从左侧目录选择，或点击“+章”创建。</p></div></div>'; renderPageToc(); updateHtmlGlobalButton(); requestAnimationFrame(refreshAnnotationCanvas); return;
+        els.preview.innerHTML = '<div class="empty"><div><h2>还没有选择小节</h2><p>从左侧目录选择，或点击“+章”创建。</p></div></div>'; renderPageToc(); updateHtmlGlobalButton(); return;
       }
       const { node, path } = info;
       els.breadcrumb.textContent = getActiveSubject().name + ' / ' + path.map(p => p.title).join(' / ');
@@ -880,10 +435,8 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       typesetMath().then(() => {
         refreshPageTocActive();
         applyPageSearch({ scroll: false, preserveIndex: true });
-        requestAnimationFrame(refreshAnnotationCanvas);
       });
       updateHtmlGlobalButton();
-      updateAnnotationControls();
     }
 
 
@@ -1930,13 +1483,13 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
           if (typeof node.html !== 'string') node.html = '';
           if (typeof node.md !== 'string') node.md = '';
           ensureNodeAssets(node);
-          normalizeNodeAnnotations(node);
+          delete node.annotations;
           compactInlineBase64Images(node);
           const htmlText = node.html.trim();
           if (htmlText.includes('HTML 渲染窗口示例') && htmlText.includes('a^2+b^2=c^2')) node.html = '';
         });
       }
-      getAnnotationSettings();
+      delete state.annotationSettings;
     }
 
     function setPreviewFullscreenState() {
@@ -1953,11 +1506,8 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       } else if (!active && els.htmlCenterMask.parentElement !== document.body) {
         document.body.appendChild(els.htmlCenterMask);
       }
-      if (!active && els.annotationSettingsPanel) els.annotationSettingsPanel.hidden = true;
       updatePrevNextState();
       updateHtmlGlobalButton();
-      updateAnnotationControls();
-      requestAnimationFrame(refreshAnnotationCanvas);
     }
 
     function openPreviewFallbackFocus() {
@@ -2014,7 +1564,6 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     function bindEvents() {
       bindMindmapPan();
       bindScrollSync();
-      bindAnnotationCanvas();
       $('#modeToggleBtn').onclick = () => { saveCurrentNode(); state.uiMode = state.uiMode === 'preview' ? 'edit' : 'preview'; applyMode(); renderEditor(); bindScrollSync(); if (state.uiMode === 'edit') syncPreviewToEditorPosition(); scheduleSave(); };
       $('#mobileMenuBtn').onclick = () => els.sidebar.classList.toggle('show');
       $('#htmlGlobalBtn').onclick = openHtmlCenter;
@@ -2025,33 +1574,6 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#prevBtn').onclick = () => goPrevNext(-1); $('#nextBtn').onclick = () => goPrevNext(1);
       $('#focusPrevBtn').onclick = () => goPrevNext(-1); $('#focusNextBtn').onclick = () => goPrevNext(1);
       $('#focusHtmlBtn').onclick = openHtmlCenter;
-      els.annotationSettingsBtn.onclick = e => {
-        e.stopPropagation();
-        els.annotationSettingsPanel.hidden = !els.annotationSettingsPanel.hidden;
-        if (!els.annotationSettingsPanel.hidden) updateAnnotationControls();
-      };
-      $('#annotationSettingsCloseBtn').onclick = () => { els.annotationSettingsPanel.hidden = true; };
-      els.annotationEnabledInput.onchange = () => {
-        getAnnotationSettings().enabled = els.annotationEnabledInput.checked;
-        updateAnnotationControls();
-        persistAnnotations();
-      };
-      els.annotationColorInput.oninput = () => {
-        getAnnotationSettings().color = els.annotationColorInput.value;
-        updateAnnotationControls();
-        persistAnnotations();
-      };
-      els.annotationSizeInput.oninput = () => {
-        getAnnotationSettings().size = Math.min(16, Math.max(1, Number(els.annotationSizeInput.value) || 4));
-        updateAnnotationControls();
-        persistAnnotations();
-      };
-      $('#annotationUndoBtn').onclick = undoAnnotationStroke;
-      $('#annotationClearBtn').onclick = clearAnnotationStrokes;
-      $('#annotationSaveBtn').onclick = async () => {
-        await persistAnnotations(true);
-        showToast('手写标记已保存');
-      };
       $('#focusEditBtn2').onclick = switchToEditModeFromFocus;
       $('#focusExitBtn').onclick = exitPreviewFocus;
       $('#fullscreenBtn').onclick = () => toggleFullscreen(document.documentElement);
@@ -2128,12 +1650,6 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#pageSearchClearBtn')?.addEventListener('click', clearPageSearch);
       document.addEventListener('click', e => {
         if(!els.searchResults.contains(e.target) && !els.globalSearch.contains(e.target)) els.searchResults.classList.remove('show');
-        if (
-          els.annotationSettingsPanel
-          && !els.annotationSettingsPanel.hidden
-          && !els.annotationSettingsPanel.contains(e.target)
-          && !els.annotationSettingsBtn.contains(e.target)
-        ) els.annotationSettingsPanel.hidden = true;
       });
       $('#toolbar').addEventListener('click', e => { const btn=e.target.closest('button'); if(!btn) return; if(btn.dataset.md) insertAtCursor(btn.dataset.md); if(btn.dataset.wrap) insertAtCursor(btn.dataset.wrap,true); if(btn.dataset.block) insertAtCursor(btn.dataset.block); });
       $('#imageBtn').onclick = () => $('#imageInput').click();
@@ -2148,7 +1664,6 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       });
       document.addEventListener('keydown', e => {
         if(e.key === 'Escape' && els.htmlCenterMask.classList.contains('show')) closeHtmlCenter();
-        if(e.key === 'Escape' && els.annotationSettingsPanel && !els.annotationSettingsPanel.hidden) els.annotationSettingsPanel.hidden = true;
         if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){ e.preventDefault(); saveCurrentNode(); idbSet(DATA_KEY,state); showToast('已手动保存'); }
         if((e.ctrlKey||e.metaKey) && e.shiftKey && e.key.toLowerCase()==='f'){ e.preventDefault(); els.pageSearchInput?.focus(); return; }
         if(e.key === 'F3'){ e.preventDefault(); goPageSearch(e.shiftKey ? -1 : 1); return; }

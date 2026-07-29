@@ -1,4 +1,4 @@
-const APP_VERSION = '20260728-stylus-engine-v3';
+const APP_VERSION = '20260729-clean-v4';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_PREFIX = '11408-notes-cache-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;

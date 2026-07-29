@@ -166,21 +166,13 @@ for (const file of coreFiles) {
   );
 }
 
-const annotationHtml = await fs.readFile(path.join(root, 'index.html'), 'utf8');
-const annotationJs = await fs.readFile(path.join(root, 'src/app.js'), 'utf8');
-const annotationCss = await fs.readFile(path.join(root, 'styles/app.css'), 'utf8');
-assert.match(annotationHtml, /id="annotationCanvas"/);
-assert.match(annotationHtml, /id="annotationSettingsPanel"/);
-assert.match(annotationJs, /event\.pointerType !== 'pen'/);
-assert.match(annotationJs, /node\.annotations/);
-assert.match(annotationJs, /idbSet\(DATA_KEY, state\)/);
-assert.match(annotationJs, /sanitizeAnnotationPoints/);
-assert.match(annotationJs, /event\.target === canvas/);
-assert.match(annotationJs, /badEdgeStart/);
-assert.match(annotationJs, /viewportHeight/);
-assert.doesNotMatch(annotationJs, /getCoalescedEvents/);
-assert.match(annotationCss, /\.annotation-canvas/);
-assert.match(annotationCss, /touch-action:\s*pan-y pinch-zoom/);
+const appHtml = await fs.readFile(path.join(root, 'index.html'), 'utf8');
+const appJs = await fs.readFile(path.join(root, 'src/app.js'), 'utf8');
+const appCss = await fs.readFile(path.join(root, 'styles/app.css'), 'utf8');
+assert.doesNotMatch(appHtml, /annotationCanvas|annotationSettingsPanel/);
+assert.doesNotMatch(appJs, /pointerType\s*!==\s*['"]pen['"]|bindAnnotationCanvas|annotationState/);
+assert.doesNotMatch(appCss, /\.annotation-canvas|\.annotation-settings-panel/);
+assert.match(appJs, /delete node\.annotations/);
+assert.match(appJs, /delete state\.annotationSettings/);
 
 console.log('Offline verification passed: app shell, navigation, scripts and MathJax work without network.');
-console.log('Stylus verification passed: pen detection, annotation canvas and IndexedDB persistence are present.');
