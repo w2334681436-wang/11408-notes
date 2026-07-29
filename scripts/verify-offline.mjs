@@ -174,5 +174,7 @@ assert.doesNotMatch(appJs, /pointerType\s*!==\s*['"]pen['"]|bindAnnotationCanvas
 assert.doesNotMatch(appCss, /\.annotation-canvas|\.annotation-settings-panel/);
 assert.match(appJs, /delete node\.annotations/);
 assert.match(appJs, /delete state\.annotationSettings/);
+assert.match(appJs, /function isPreviewFocusActive\(\)/);
+assert.match(appJs, /#focusPreviewBtn'\)\.onclick = togglePreviewFocus/);
 
 console.log('Offline verification passed: app shell, navigation, scripts and MathJax work without network.');

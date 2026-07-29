@@ -1492,6 +1492,11 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       delete state.annotationSettings;
     }
 
+    function isPreviewFocusActive() {
+      const previewCard = document.querySelector('.preview-card');
+      return !!previewCard && (document.fullscreenElement === previewCard || previewFallbackFocus);
+    }
+
     function setPreviewFullscreenState() {
       const previewCard = document.querySelector('.preview-card');
       const nativeActive = document.fullscreenElement === previewCard;

@@ -1,4 +1,4 @@
-const APP_VERSION = '20260729-clean-v4';
+const APP_VERSION = '20260729-focus-fix-v5';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_PREFIX = '11408-notes-cache-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;
