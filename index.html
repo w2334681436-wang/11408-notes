@@ -8,7 +8,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <meta name="theme-color" content="#2563eb" />
-  <meta name="app-build" content="20260730-focus-preview-redeploy" />
+  <meta name="app-build" content="20260809-focus-zoom-scroll-reset" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="11408笔记" />
@@ -27,7 +27,7 @@
   <script>
     (function () {
       // 每次发布新版时只需要更新这里的版本号；不要每次打开都随机生成，否则 PWA/Service Worker 会反复重装并造成频闪。
-      const APP_VERSION = '20260729-focus-fix-v5';
+      const APP_VERSION = '20260809-focus-zoom-v6';
       window.__APP_VERSION__ = APP_VERSION;
       document.documentElement.setAttribute('data-app-version', APP_VERSION);
       const css = document.createElement('link');
@@ -155,6 +155,13 @@
             <div class="focus-preview-actions">
               <button class="small soft" id="focusPrevBtn">上一节</button>
               <button class="small soft" id="focusNextBtn">下一节</button>
+              <label class="focus-preview-zoom" for="focusZoomRange" title="调节专注预览的正文字号">
+                <span class="focus-preview-zoom-label">字号</span>
+                <span class="focus-preview-zoom-small" aria-hidden="true">A</span>
+                <input id="focusZoomRange" type="range" min="75" max="180" step="5" value="100" aria-label="专注预览字号" />
+                <span class="focus-preview-zoom-large" aria-hidden="true">A</span>
+                <output id="focusZoomValue" for="focusZoomRange">100%</output>
+              </label>
               <button class="small soft" id="focusHtmlBtn">显示HTML</button>
               <button class="small primary" id="focusEditBtn2">切换编辑</button>
               <button class="small" id="focusExitBtn">退出全屏</button>
