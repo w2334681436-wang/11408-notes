@@ -5,7 +5,13 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     const SECTION_PACKAGE_APP = '11408-notes-section-package';
     const SECTION_PACKAGE_VERSION = 1;
     const MAX_SECTION_PACKAGE_BYTES = 100 * 1024 * 1024;
-    const MATHJAX_ASSET_URL = new URL('./vendor/mathjax/tex-svg.js', document.baseURI).href;
+    const MATHJAX_ASSET_URL = (() => {
+      const url = new URL('./vendor/mathjax/tex-svg.js', document.baseURI);
+      url.searchParams.set('v', window.__APP_VERSION__ || '20260809-render-engine-v9');
+      return url.href;
+    })();
+    const MARKDOWN_IT_ASSET_URL = new URL(`./vendor/markdown-it/markdown-it.min.js?v=${window.__APP_VERSION__ || '20260809-render-engine-v9'}`, document.baseURI).href;
+    const MARKDOWN_RENDERER_ASSET_URL = new URL(`./src/markdown-renderer.js?v=${window.__APP_VERSION__ || '20260809-render-engine-v9'}`, document.baseURI).href;
     const SUBJECTS = [
       { id: 'gaoshu', name: '高数', short: '高' },
       { id: 'xiandai', name: '线代', short: '线' },
@@ -30,6 +36,11 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let pdfRenderNodeId = null;
     let previewFallbackFocus = false;
     let pendingSectionTopReset = false;
+    let mathJaxRetryPromise = null;
+    let mathJaxFailureNotified = false;
+    let markdownRendererRetryPromise = null;
+    let mathTypesetQueue = Promise.resolve(false);
+    let previewRenderRevision = 0;
 
     const $ = s => document.querySelector(s);
     const els = {
@@ -485,6 +496,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     function renderPreview(md, html) {
+      const renderRevision = ++previewRenderRevision;
       const base = mdToHtml(md || '');
       els.preview.innerHTML = base;
       renderPageToc();
@@ -494,7 +506,8 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         if (htmlCode.trim()) setHtmlCenterContent(htmlCode);
         else closeHtmlCenter();
       }
-      typesetMath().then(() => {
+      typesetMath(renderRevision).then(() => {
+        if (renderRevision !== previewRenderRevision) return;
         refreshPageTocActive();
         applyPageSearch({ scroll: false, preserveIndex: true });
         if (pendingSectionTopReset) {
@@ -664,12 +677,59 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${cfg}<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Arial,sans-serif;padding:16px;line-height:1.7;color:#172033}img{max-width:100%;border-radius:12px}pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:12px;overflow:auto}table{border-collapse:collapse;width:100%}td,th{border:1px solid #e5e7eb;padding:8px}</style></head><body>${body}</body></html>`;
     }
 
-    function typesetMath() {
-      if (window.MathJax?.typesetPromise) {
-        window.MathJax.typesetClear?.([els.preview]);
-        return window.MathJax.typesetPromise([els.preview]).catch(() => {});
+    function waitForMathJaxReady(timeoutMs = 3000) {
+      if (window.MathJax?.typesetPromise) return Promise.resolve(true);
+      return new Promise(resolve => {
+        const startedAt = Date.now();
+        const timer = setInterval(() => {
+          if (window.MathJax?.typesetPromise) {
+            clearInterval(timer);
+            resolve(true);
+          } else if (Date.now() - startedAt >= timeoutMs) {
+            clearInterval(timer);
+            resolve(false);
+          }
+        }, 100);
+      });
+    }
+
+    async function ensureMathJaxReady() {
+      if (await waitForMathJaxReady(800)) return true;
+      if (!mathJaxRetryPromise) {
+        mathJaxRetryPromise = new Promise(resolve => {
+          document.querySelector('script[data-mathjax-retry="true"]')?.remove();
+          const script = document.createElement('script');
+          script.src = MATHJAX_ASSET_URL;
+          script.dataset.mathjaxRetry = 'true';
+          script.onload = async () => resolve(await waitForMathJaxReady(6000));
+          script.onerror = () => resolve(false);
+          document.head.appendChild(script);
+          setTimeout(() => resolve(false), 8000);
+        }).finally(() => {
+          if (!window.MathJax?.typesetPromise) mathJaxRetryPromise = null;
+        });
       }
-      return Promise.resolve();
+      return mathJaxRetryPromise;
+    }
+
+    function typesetMath(expectedRevision = previewRenderRevision) {
+      mathTypesetQueue = mathTypesetQueue.catch(() => false).then(async () => {
+        if (expectedRevision !== previewRenderRevision) return false;
+        const ready = await ensureMathJaxReady();
+        if (expectedRevision !== previewRenderRevision) return false;
+        if (!ready || !window.MathJax?.typesetPromise) {
+          if (!mathJaxFailureNotified) {
+            mathJaxFailureNotified = true;
+            showToast('公式引擎加载失败，联网后刷新即可自动恢复');
+          }
+          return false;
+        }
+        mathJaxFailureNotified = false;
+        window.MathJax.typesetClear?.([els.preview]);
+        await window.MathJax.typesetPromise([els.preview]).catch(() => {});
+        return expectedRevision === previewRenderRevision;
+      });
+      return mathTypesetQueue;
     }
 
     function clearPageSearchMarks(root = els.preview) {
@@ -889,7 +949,75 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       scheduleSave();
     }
 
+    function resolveMarkdownImage(id, alt = '') {
+      const info = findNodeById(pdfRenderNodeId || state.activeNodeId);
+      const asset = info ? getImageAsset(info.node, id) : null;
+      if (!asset?.src) return null;
+      return { src: asset.src, name: asset.name || '图片', alt: alt || asset.name || '图片' };
+    }
+
+    function loadRendererAsset(src, kind) {
+      return new Promise(resolve => {
+        document.querySelector(`script[data-renderer-retry="${kind}"]`)?.remove();
+        const script = document.createElement('script');
+        script.src = src;
+        script.dataset.rendererRetry = kind;
+        script.onload = () => resolve(true);
+        script.onerror = () => resolve(false);
+        document.head.appendChild(script);
+        setTimeout(() => resolve(false), 8000);
+      });
+    }
+
+    function ensureMarkdownRendererReady() {
+      if (window.NotesMarkdownRenderer?.render) return Promise.resolve(true);
+      if (markdownRendererRetryPromise) return markdownRendererRetryPromise;
+      markdownRendererRetryPromise = (async () => {
+        if (typeof window.markdownit !== 'function') {
+          const loaded = await loadRendererAsset(MARKDOWN_IT_ASSET_URL, 'markdown-it');
+          if (!loaded || typeof window.markdownit !== 'function') return false;
+        }
+        if (!window.NotesMarkdownRenderer?.render) {
+          const loaded = await loadRendererAsset(MARKDOWN_RENDERER_ASSET_URL, 'markdown-renderer');
+          if (!loaded) return false;
+        }
+        return !!window.NotesMarkdownRenderer?.render;
+      })().then(ready => {
+        if (ready) requestAnimationFrame(() => renderEditor());
+        return ready;
+      }).finally(() => {
+        if (!window.NotesMarkdownRenderer?.render) markdownRendererRetryPromise = null;
+      });
+      return markdownRendererRetryPromise;
+    }
+
     function mdToHtml(md) {
+      if (!String(md || '').trim()) return '<div class="empty"><div><h2>开始写这一小节</h2><p>点击顶部“编辑”进入双栏编辑；默认页面只优先显示渲染结果。</p></div></div>';
+      if (window.NotesMarkdownRenderer?.render) {
+        const rendered = window.NotesMarkdownRenderer.render(md, { resolveImage: resolveMarkdownImage });
+        if (typeof rendered === 'string') return rendered;
+      }
+      ensureMarkdownRendererReady().catch(() => {});
+      return legacyMdToHtml(md);
+    }
+
+    function normalizeMarkdownForRendering(md) {
+      let text = String(md || '').replace(/\r\n?/g, '\n');
+
+      // AI/JSON 导入偶尔把围栏后的换行保存成字面量 "\\n"，只修复围栏边界，不改代码正文里的 \\n。
+      text = text
+        .replace(/(^|\n)([ \t]*)(`{3,}|~{3,})([a-zA-Z0-9_#+.-]*)\\n(\\n)?/g, (_, start, indent, fence, lang, second) => `${start}${indent}${fence}${lang}\n${second ? '\n' : ''}`)
+        .replace(/\\n([ \t]*)(`{3,}|~{3,})(?=[ \t]*(?:\n|$))/g, '\n$1$2');
+
+      // ChatGPT 等来源常把数学分隔符写成 \\$...\\$；成对出现时应恢复为真正公式。
+      text = text
+        .replace(/\\\$\\\$([\s\S]*?)\\\$\\\$/g, (_, body) => `$$${body}$$`)
+        .replace(/\\\$([^\n]*?)\\\$/g, (_, body) => body.trim() ? `$${body}$` : _);
+      return text;
+    }
+
+    function legacyMdToHtml(md) {
+      md = normalizeMarkdownForRendering(md);
       if (!md.trim()) return '<div class="empty"><div><h2>开始写这一小节</h2><p>点击顶部“编辑”进入双栏编辑；默认页面只优先显示渲染结果。</p></div></div>';
 
       const codeBlocks = [];

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = process.argv[2] ? path.resolve(process.cwd(), process.argv[2]) : projectRoot;
 const scope = 'https://example.test/11408-notes/';
-const appVersion = '20260809-focus-zoom-v7';
+const appVersion = '20260809-render-engine-v9';
 const listeners = new Map();
 const stores = new Map();
 let online = true;
@@ -127,7 +127,7 @@ await dispatchExtendable('activate');
 const cacheNames = (await caches.keys()).filter((name) => !name.endsWith('runtime'));
 assert.equal(cacheNames.length, 1);
 const cache = await caches.open(cacheNames[0]);
-assert.equal(cache.responses.size, 10, 'Every declared app-shell resource must be cached');
+assert.equal(cache.responses.size, 12, 'Every declared app-shell resource must be cached');
 
 // 回归测试：新版 HTML 请求新 ?v= 时，不能因为 ignoreSearch 命中旧脚本。
 await cache.put(`${scope}src/app.js?v=${appVersion}`, new Response('STALE_APP_JS'));
@@ -166,12 +166,21 @@ const mathJaxResponse = await dispatchFetch({
   method: 'GET',
   mode: 'same-origin',
   destination: 'script',
-  url: `${scope}vendor/mathjax/tex-svg.js`
+  url: `${scope}vendor/mathjax/tex-svg.js?v=${appVersion}`
 });
 assert.equal(mathJaxResponse.status, 200);
 assert.ok((await mathJaxResponse.arrayBuffer()).byteLength > 2_000_000);
 
-const coreFiles = ['index.html', 'src/app.js', 'src/pwa.js', 'styles/app.css', 'service-worker.js'];
+const markdownItResponse = await dispatchFetch({
+  method: 'GET',
+  mode: 'same-origin',
+  destination: 'script',
+  url: `${scope}vendor/markdown-it/markdown-it.min.js?v=${appVersion}`
+});
+assert.equal(markdownItResponse.status, 200);
+assert.ok((await markdownItResponse.arrayBuffer()).byteLength > 100_000);
+
+const coreFiles = ['index.html', 'src/app.js', 'src/pwa.js', 'src/markdown-renderer.js', 'styles/app.css', 'service-worker.js'];
 for (const file of coreFiles) {
   const text = await fs.readFile(path.join(root, file), 'utf8');
   assert.doesNotMatch(
@@ -199,10 +208,15 @@ assert.match(appJs, /function prepareSectionNavigation\(\)/);
 assert.match(appJs, /pendingSectionTopReset/);
 assert.match(appCss, /--preview-body-size/);
 assert.match(appCss, /overflow-anchor:\s*none/);
-assert.match(appHtml, /20260809-focus-zoom-v7/);
-assert.match(pwaJs, /20260809-focus-zoom-v7/);
+assert.match(appHtml, /20260809-render-engine-v9/);
+assert.match(pwaJs, /20260809-render-engine-v9/);
 assert.match(appJs, /PREVIEW_SCALE_KEY/);
 assert.match(pwaJs, /controllerchange/);
 assert.match(await fs.readFile(path.join(root, 'service-worker.js'), 'utf8'), /ignoreSearch:\s*!hasVersion/);
+assert.match(appJs, /NotesMarkdownRenderer/);
+assert.match(appJs, /function ensureMathJaxReady\(\)/);
+assert.match(appJs, /data-mathjax-retry/);
+assert.match(appJs, /mathTypesetQueue/);
+assert.match(appJs, /previewRenderRevision/);
 
 console.log('Offline verification passed: app shell, navigation, scripts and MathJax work without network.');

@@ -1,4 +1,4 @@
-const APP_VERSION = '20260809-focus-zoom-v7';
+const APP_VERSION = '20260809-render-engine-v9';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_PREFIX = '11408-notes-cache-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;
@@ -11,7 +11,9 @@ const PRECACHE_URLS = [
   `./styles/app.css?v=${APP_VERSION}`,
   `./src/app.js?v=${APP_VERSION}`,
   `./src/pwa.js?v=${APP_VERSION}`,
-  './vendor/mathjax/tex-svg.js',
+  `./src/markdown-renderer.js?v=${APP_VERSION}`,
+  `./vendor/markdown-it/markdown-it.min.js?v=${APP_VERSION}`,
+  `./vendor/mathjax/tex-svg.js?v=${APP_VERSION}`,
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png'

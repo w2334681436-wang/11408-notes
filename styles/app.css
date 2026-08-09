@@ -305,10 +305,20 @@
     .preview h2 { font-size: var(--preview-h2-size); margin-top: 28px; }
     .preview h3 { font-size: var(--preview-h3-size); margin-top: 22px; }
     .preview p { margin: 10px 0; }
+    .preview ul, .preview ol { margin: 10px 0; padding-left: 1.75em; }
+    .preview li { margin: 5px 0; }
+    .preview li > ul, .preview li > ol { margin: 4px 0; }
+    .preview .task-list-item { list-style: none; margin-left: -1.45em; }
+    .preview .task-list-item input { margin: 0 7px 0 0; accent-color: var(--brand); }
     .preview blockquote { margin: 12px 0; padding: 10px 14px; background: #f8fafc; border-left: 4px solid #93c5fd; border-radius: 10px; color: #475569; }
     .preview code { background: #f1f5f9; padding: 2px 6px; border-radius: 7px; font-family: Consolas, monospace; }
     .preview pre { background: var(--code-bg); color: var(--code-text); padding: 14px; border-radius: 14px; overflow: auto; }
-    .preview pre code { background: transparent; padding: 0; color: inherit; }
+    .preview pre code { display: block; background: transparent; padding: 0; color: inherit; white-space: pre; tab-size: 2; }
+    .preview a { color: var(--brand); text-decoration-thickness: 1px; text-underline-offset: 3px; overflow-wrap: anywhere; }
+    .preview hr { margin: 26px 0; border: 0; border-top: 1px solid var(--line); }
+    .preview .math-inline { white-space: nowrap; }
+    .preview .math-block { margin: 14px 0; overflow-x: auto; overflow-y: hidden; }
+    .preview .markdown-image-missing { color: #dc2626; font-weight: 700; }
     .preview img { max-width: 100%; border-radius: 14px; border: 1px solid var(--line); display: block; margin: 12px 0; }
     .preview table { border-collapse: collapse; width: 100%; margin: 12px 0; }
     .preview th, .preview td { border: 1px solid var(--line); padding: 8px 10px; }

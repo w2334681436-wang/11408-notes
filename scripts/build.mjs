@@ -30,6 +30,12 @@ await access(mathJaxSource);
 await mkdir(dirname(mathJaxTarget), { recursive: true });
 await copyFile(mathJaxSource, mathJaxTarget);
 
+const markdownItSource = resolve(root, 'node_modules/markdown-it/dist/markdown-it.min.js');
+const markdownItTarget = resolve(dist, 'vendor/markdown-it/markdown-it.min.js');
+await access(markdownItSource);
+await mkdir(dirname(markdownItTarget), { recursive: true });
+await copyFile(markdownItSource, markdownItTarget);
+
 const mathJaxLicense = resolve(root, 'node_modules/mathjax/LICENSE');
 try {
   await copyFile(mathJaxLicense, resolve(dist, 'vendor/mathjax/LICENSE'));
