@@ -200,7 +200,13 @@
       background: #0b1220; color: #dbeafe;
     }
 
-    .preview-card { position: relative; }
+    .preview-card {
+      position: relative;
+      --preview-body-size: 16px;
+      --preview-h1-size: 30px;
+      --preview-h2-size: 23px;
+      --preview-h3-size: 19px;
+    }
     .focus-preview-topbar {
       display: none;
       align-items: center;
@@ -225,6 +231,31 @@
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
     }
+    .focus-preview-zoom {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      flex: none;
+      min-height: 32px;
+      padding: 4px 9px;
+      border: 1px solid #dbeafe;
+      border-radius: 12px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .focus-preview-zoom input[type="range"] {
+      width: clamp(92px, 13vw, 160px);
+      margin: 0;
+      accent-color: var(--brand);
+      cursor: pointer;
+      touch-action: pan-x;
+    }
+    .focus-preview-zoom-small { font-size: 11px; }
+    .focus-preview-zoom-large { font-size: 16px; }
+    .focus-preview-zoom output { min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
     .preview-card:fullscreen,
     .preview-card.is-preview-fullscreen {
       width: 100vw;
@@ -262,17 +293,17 @@
       z-index: 50;
     }
     .preview-shell { flex: 1; min-height: 0; overflow: auto; background: #fff; }
-    .preview-shell { position: relative; overscroll-behavior: contain; }
+    .preview-shell { position: relative; overscroll-behavior: contain; overflow-anchor: none; }
     .preview {
       position: relative;
       z-index: 1;
       min-height: 100%; padding: 28px min(7vw, 70px) 42px;
-      line-height: 1.86; color: #1f2937; font-size: 16px;
+      line-height: 1.86; color: #1f2937; font-size: var(--preview-body-size);
     }
     .preview h1, .preview h2, .preview h3 { line-height: 1.35; color: #111827; }
-    .preview h1 { font-size: 30px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
-    .preview h2 { font-size: 23px; margin-top: 28px; }
-    .preview h3 { font-size: 19px; margin-top: 22px; }
+    .preview h1 { font-size: var(--preview-h1-size); border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+    .preview h2 { font-size: var(--preview-h2-size); margin-top: 28px; }
+    .preview h3 { font-size: var(--preview-h3-size); margin-top: 22px; }
     .preview p { margin: 10px 0; }
     .preview blockquote { margin: 12px 0; padding: 10px 14px; background: #f8fafc; border-left: 4px solid #93c5fd; border-radius: 10px; color: #475569; }
     .preview code { background: #f1f5f9; padding: 2px 6px; border-radius: 7px; font-family: Consolas, monospace; }

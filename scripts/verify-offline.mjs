@@ -168,6 +168,7 @@ for (const file of coreFiles) {
 
 const appHtml = await fs.readFile(path.join(root, 'index.html'), 'utf8');
 const appJs = await fs.readFile(path.join(root, 'src/app.js'), 'utf8');
+const pwaJs = await fs.readFile(path.join(root, 'src/pwa.js'), 'utf8');
 const appCss = await fs.readFile(path.join(root, 'styles/app.css'), 'utf8');
 assert.doesNotMatch(appHtml, /annotationCanvas|annotationSettingsPanel/);
 assert.doesNotMatch(appJs, /pointerType\s*!==\s*['"]pen['"]|bindAnnotationCanvas|annotationState/);
@@ -176,5 +177,13 @@ assert.match(appJs, /delete node\.annotations/);
 assert.match(appJs, /delete state\.annotationSettings/);
 assert.match(appJs, /function isPreviewFocusActive\(\)/);
 assert.match(appJs, /#focusPreviewBtn'\)\.onclick = togglePreviewFocus/);
+assert.match(appHtml, /id="focusZoomRange"[^>]+type="range"/);
+assert.match(appJs, /function setPreviewScale\(value\)/);
+assert.match(appJs, /function prepareSectionNavigation\(\)/);
+assert.match(appJs, /pendingSectionTopReset/);
+assert.match(appCss, /--preview-body-size/);
+assert.match(appCss, /overflow-anchor:\s*none/);
+assert.match(appHtml, /20260809-focus-zoom-v6/);
+assert.match(pwaJs, /20260809-focus-zoom-v6/);
 
 console.log('Offline verification passed: app shell, navigation, scripts and MathJax work without network.');

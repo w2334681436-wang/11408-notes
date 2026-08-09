@@ -17,7 +17,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       { id: 'politics', name: '政治', short: '政' }
     ];
 
-    let state = { activeSubjectId: 'gaoshu', activeNodeId: null, expanded: {}, uiMode: 'preview', htmlVisible: true, subjects: [] };
+    let state = { activeSubjectId: 'gaoshu', activeNodeId: null, expanded: {}, uiMode: 'preview', htmlVisible: true, previewScale: 1, subjects: [] };
     let mindPan = { x: 0, y: 0, scale: 1, dragging: false, startX: 0, startY: 0, baseX: 0, baseY: 0, moved: false };
     let mindmapNeedsRefresh = true;
     let saveTimer = null;
@@ -28,6 +28,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let scrollSyncState = { lock: false, raf: 0 };
     let pdfRenderNodeId = null;
     let previewFallbackFocus = false;
+    let pendingSectionTopReset = false;
 
     const $ = s => document.querySelector(s);
     const els = {
@@ -39,6 +40,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       modalMask: $('#modalMask'), modalTitle: $('#modalTitle'), modalInput: $('#modalInput'),
       importMask: $('#importMask'), importText: $('#importText'),
       htmlCenterMask: $('#htmlCenterMask'), htmlCenterPanel: $('#htmlCenterPanel'), htmlCenterFrame: $('#htmlCenterFrame'),
+      focusZoomRange: $('#focusZoomRange'), focusZoomValue: $('#focusZoomValue'),
       toast: $('#toast')
     };
 
@@ -64,7 +66,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       const co1 = createNode('第一章 计算机系统概述', 1); const co2 = createNode('第二章 数据的表示和运算', 1);
       co2.children.push(createNode('2.1 进位计数制', 2)); co2.children.push(createNode('2.2 定点数与浮点数', 2)); co.nodes = [co1, co2];
       for (const s of subjects) if (!s.nodes.length) { const first = createNode('第一章 请在这里建立本书框架', 1, `# ${s.name} 笔记\n\n## 今日任务\n- 建立章节目录\n- 写清本章核心考点\n- 记录错题和条件反射`); first.children.push(createNode('1.1 新建小节', 2)); s.nodes.push(first); }
-      return { activeSubjectId: 'gaoshu', activeNodeId: gaoshu.nodes[0].id, expanded: {}, uiMode: 'preview', htmlVisible: true, subjects };
+      return { activeSubjectId: 'gaoshu', activeNodeId: gaoshu.nodes[0].id, expanded: {}, uiMode: 'preview', htmlVisible: true, previewScale: 1, subjects };
     }
 
     function openDB() { return new Promise((resolve, reject) => { const req = indexedDB.open(DB_NAME, 1); req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME); }; req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); }); }
@@ -262,6 +264,36 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
 
+    function normalizePreviewScale(value) {
+      const scale = Number(value);
+      if (!Number.isFinite(scale)) return 1;
+      return Math.min(1.8, Math.max(0.75, Math.round(scale * 20) / 20));
+    }
+
+    function applyPreviewScale() {
+      const scale = normalizePreviewScale(state.previewScale);
+      state.previewScale = scale;
+      const previewCard = document.querySelector('.preview-card');
+      if (previewCard) {
+        previewCard.style.setProperty('--preview-body-size', `${(16 * scale).toFixed(2)}px`);
+        previewCard.style.setProperty('--preview-h1-size', `${(30 * scale).toFixed(2)}px`);
+        previewCard.style.setProperty('--preview-h2-size', `${(23 * scale).toFixed(2)}px`);
+        previewCard.style.setProperty('--preview-h3-size', `${(19 * scale).toFixed(2)}px`);
+      }
+      const percent = Math.round(scale * 100);
+      if (els.focusZoomRange) els.focusZoomRange.value = String(percent);
+      if (els.focusZoomValue) els.focusZoomValue.textContent = `${percent}%`;
+    }
+
+    function setPreviewScale(value) {
+      const previewShell = getPreviewShell();
+      const scrollRatio = getScrollRatio(previewShell);
+      state.previewScale = normalizePreviewScale(Number(value) / 100);
+      applyPreviewScale();
+      requestAnimationFrame(() => setScrollRatio(previewShell, scrollRatio));
+      scheduleSave();
+    }
+
     function applyMode() {
       els.app.classList.toggle('read-mode', state.uiMode === 'preview');
       $('#modeToggleBtn').textContent = state.uiMode === 'preview' ? '编辑' : '预览';
@@ -303,15 +335,30 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     function scrollContentTop() {
-      requestAnimationFrame(() => {
+      const reset = () => {
         const previewShell = document.querySelector('.preview-shell');
-        if (previewShell) previewShell.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+        if (previewShell) {
+          previewShell.scrollTop = 0;
+          previewShell.scrollLeft = 0;
+          previewShell.scrollTo?.({ top: 0, left: 0, behavior: 'auto' });
+        }
         if (els.mdEditor) els.mdEditor.scrollTop = 0;
         if (els.htmlEditor) els.htmlEditor.scrollTop = 0;
         const scrollingElement = document.scrollingElement || document.documentElement || document.body;
         if (scrollingElement) scrollingElement.scrollTop = 0;
         window.scrollTo?.(0, 0);
+      };
+      reset();
+      requestAnimationFrame(() => {
+        reset();
+        requestAnimationFrame(reset);
       });
+      setTimeout(reset, 240);
+    }
+
+    function prepareSectionNavigation() {
+      pendingSectionTopReset = true;
+      scrollContentTop();
     }
 
     function getPreviewShell() {
@@ -369,7 +416,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       }
     }
 
-    function renderAll() { applyMode(); renderSubjects(); renderTree(); renderEditor(); bindScrollSync(); runSearch(); updateHtmlGlobalButton(); }
+    function renderAll() { applyMode(); applyPreviewScale(); renderSubjects(); renderTree(); renderEditor(); bindScrollSync(); runSearch(); updateHtmlGlobalButton(); }
 
     function renderSubjects() {
       els.subjectList.innerHTML = '';
@@ -377,7 +424,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
         const item = document.createElement('div');
         item.className = 'subject-item' + (s.id === state.activeSubjectId ? ' active' : '');
         item.innerHTML = `<div class="subject-badge">${escapeHtml(s.short)}</div><div class="subject-name">${escapeHtml(s.name)}</div>`;
-        item.onclick = () => { saveCurrentNode(); closeHtmlCenter(); state.activeSubjectId = s.id; const first = flattenSubject(s)[0]; state.activeNodeId = first ? first.node.id : null; markMindmapDirty(); els.sidebar.classList.remove('show'); renderAll(); scrollContentTop(); scheduleSave(); };
+        item.onclick = () => { saveCurrentNode(); closeHtmlCenter(); prepareSectionNavigation(); state.activeSubjectId = s.id; const first = flattenSubject(s)[0]; state.activeNodeId = first ? first.node.id : null; markMindmapDirty(); els.sidebar.classList.remove('show'); renderAll(); scrollContentTop(); scheduleSave(); };
         els.subjectList.appendChild(item);
       }
     }
@@ -435,6 +482,10 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       typesetMath().then(() => {
         refreshPageTocActive();
         applyPageSearch({ scroll: false, preserveIndex: true });
+        if (pendingSectionTopReset) {
+          pendingSectionTopReset = false;
+          scrollContentTop();
+        }
       });
       updateHtmlGlobalButton();
     }
@@ -769,17 +820,17 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       if (upBtn) upBtn.disabled = !canUp;
       if (downBtn) downBtn.disabled = !canDown;
     }
-    function selectNode(id) { saveCurrentNode(); closeHtmlCenter(); state.activeNodeId = id; const info = findNodeById(id); if (info) info.path.forEach(p => state.expanded[p.id] = true); els.sidebar.classList.remove('show'); renderTree(); renderEditor(); scrollContentTop(); scheduleSave(); }
+    function selectNode(id) { saveCurrentNode(); closeHtmlCenter(); prepareSectionNavigation(); state.activeNodeId = id; const info = findNodeById(id); if (info) info.path.forEach(p => state.expanded[p.id] = true); els.sidebar.classList.remove('show'); renderTree(); renderEditor(); scrollContentTop(); scheduleSave(); }
     function saveCurrentNode() { const info = findNodeById(state.activeNodeId); if (!info) return; info.node.title = els.titleInput.value.trim() || '未命名小节'; info.node.md = els.mdEditor.value; info.node.html = els.htmlEditor.value; ensureNodeAssets(info.node); compactInlineBase64Images(info.node); if (els.mdEditor.value !== info.node.md) els.mdEditor.value = info.node.md; info.node.updatedAt = Date.now(); }
     function scheduleSave() { clearTimeout(saveTimer); if (els.saveState) els.saveState.textContent = '正在保存……'; saveTimer = setTimeout(async () => { saveCurrentNode(); await idbSet(DATA_KEY, state); if (els.saveState) els.saveState.textContent = '已保存到浏览器本地 IndexedDB · ' + new Date().toLocaleTimeString(); }, 300); }
     function showToast(msg) { els.toast.textContent = msg; els.toast.classList.add('show'); setTimeout(() => els.toast.classList.remove('show'), 1600); }
 
     function promptModal(title, placeholder='请输入名称', value='') { els.modalTitle.textContent = title; els.modalInput.placeholder = placeholder; els.modalInput.value = value; els.modalMask.classList.add('show'); setTimeout(() => els.modalInput.focus(), 50); return new Promise(resolve => modalResolve = resolve); }
     function closeModal(result=null) { els.modalMask.classList.remove('show'); if (modalResolve) modalResolve(result); modalResolve = null; }
-    async function addRoot() { const title = await promptModal('新建章', '例如：第三章 一元函数积分学'); if (!title) return; const node = createNode(title, 1); getActiveSubject().nodes.push(node); state.activeNodeId = node.id; state.expanded[node.id] = true; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
-    async function addChild(parentId=state.activeNodeId) { const info = findNodeById(parentId); if (!info) return; const title = await promptModal('新建子节', '例如：2.1 中值定理的使用条件'); if (!title) return; const node = createNode(title, (info.node.level || 1) + 1); info.node.children = info.node.children || []; info.node.children.push(node); state.expanded[info.node.id] = true; state.activeNodeId = node.id; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
-    async function addSibling() { const info = findNodeById(state.activeNodeId); if (!info) return; const title = await promptModal('新建同级小节', '例如：下一节标题'); if (!title) return; const node = createNode(title, info.node.level || 1); const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index + 1, 0, node); state.activeNodeId = node.id; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
-    function deleteNode() { const info = findNodeById(state.activeNodeId); if (!info) return; if (!confirm(`确定删除“${info.node.title}”以及它下面的所有子节吗？`)) return; const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index, 1); const arr = flattenSubject(); state.activeNodeId = arr[Math.min(info.index, arr.length - 1)]?.node.id || null; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
+    async function addRoot() { const title = await promptModal('新建章', '例如：第三章 一元函数积分学'); if (!title) return; const node = createNode(title, 1); getActiveSubject().nodes.push(node); prepareSectionNavigation(); state.activeNodeId = node.id; state.expanded[node.id] = true; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
+    async function addChild(parentId=state.activeNodeId) { const info = findNodeById(parentId); if (!info) return; const title = await promptModal('新建子节', '例如：2.1 中值定理的使用条件'); if (!title) return; const node = createNode(title, (info.node.level || 1) + 1); info.node.children = info.node.children || []; info.node.children.push(node); state.expanded[info.node.id] = true; prepareSectionNavigation(); state.activeNodeId = node.id; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
+    async function addSibling() { const info = findNodeById(state.activeNodeId); if (!info) return; const title = await promptModal('新建同级小节', '例如：下一节标题'); if (!title) return; const node = createNode(title, info.node.level || 1); const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index + 1, 0, node); prepareSectionNavigation(); state.activeNodeId = node.id; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
+    function deleteNode() { const info = findNodeById(state.activeNodeId); if (!info) return; if (!confirm(`确定删除“${info.node.title}”以及它下面的所有子节吗？`)) return; const list = info.parent ? info.parent.children : getActiveSubject().nodes; list.splice(info.index, 1); const arr = flattenSubject(); prepareSectionNavigation(); state.activeNodeId = arr[Math.min(info.index, arr.length - 1)]?.node.id || null; renderAll(); scrollContentTop(); refreshMindmapIfOpen({ center: true }); scheduleSave(); }
     function goPrevNext(delta) {
       saveCurrentNode();
       const { arr, idx } = getNavigationPosition();
@@ -1478,6 +1529,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     function normalizeImportedData() {
+      state.previewScale = normalizePreviewScale(state.previewScale);
       for (const subject of state.subjects || []) {
         walk(subject.nodes || [], node => {
           if (typeof node.html !== 'string') node.html = '';
@@ -1513,6 +1565,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       }
       updatePrevNextState();
       updateHtmlGlobalButton();
+      applyPreviewScale();
     }
 
     function openPreviewFallbackFocus() {
@@ -1578,6 +1631,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#addRootBtn').onclick = addRoot; $('#addChildBtn').onclick = () => addChild(); $('#addSiblingBtn').onclick = addSibling; $('#moveUpBtn').onclick = () => moveActiveNode(-1); $('#moveDownBtn').onclick = () => moveActiveNode(1); $('#deleteNodeBtn').onclick = deleteNode;
       $('#prevBtn').onclick = () => goPrevNext(-1); $('#nextBtn').onclick = () => goPrevNext(1);
       $('#focusPrevBtn').onclick = () => goPrevNext(-1); $('#focusNextBtn').onclick = () => goPrevNext(1);
+      els.focusZoomRange?.addEventListener('input', e => setPreviewScale(e.target.value));
       $('#focusHtmlBtn').onclick = openHtmlCenter;
       $('#focusEditBtn2').onclick = switchToEditModeFromFocus;
       $('#focusExitBtn').onclick = exitPreviewFocus;
