@@ -8,7 +8,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <meta name="theme-color" content="#2563eb" />
-  <meta name="app-build" content="20260809-focus-zoom-scroll-reset" />
+  <meta name="app-build" content="20260809-focus-zoom-cache-fix" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="11408笔记" />
@@ -27,13 +27,31 @@
   <script>
     (function () {
       // 每次发布新版时只需要更新这里的版本号；不要每次打开都随机生成，否则 PWA/Service Worker 会反复重装并造成频闪。
-      const APP_VERSION = '20260809-focus-zoom-v6';
+      const APP_VERSION = '20260809-focus-zoom-v7';
       window.__APP_VERSION__ = APP_VERSION;
       document.documentElement.setAttribute('data-app-version', APP_VERSION);
       const css = document.createElement('link');
       css.rel = 'stylesheet';
       css.href = `./styles/app.css?v=${APP_VERSION}`;
       document.head.appendChild(css);
+
+      // 独立于主脚本的字号兜底：即使旧 Service Worker 暂时返回旧 app.js，滑块也必须立即生效。
+      window.__setFocusPreviewScaleFallback = function (rawValue) {
+        const percent = Math.min(180, Math.max(75, Number(rawValue) || 100));
+        const scale = percent / 100;
+        const previewCard = document.querySelector('.preview-card');
+        if (previewCard) {
+          previewCard.style.setProperty('--preview-body-size', `${(16 * scale).toFixed(2)}px`);
+          previewCard.style.setProperty('--preview-h1-size', `${(30 * scale).toFixed(2)}px`);
+          previewCard.style.setProperty('--preview-h2-size', `${(23 * scale).toFixed(2)}px`);
+          previewCard.style.setProperty('--preview-h3-size', `${(19 * scale).toFixed(2)}px`);
+        }
+        const range = document.getElementById('focusZoomRange');
+        const output = document.getElementById('focusZoomValue');
+        if (range && Number(range.value) !== percent) range.value = String(percent);
+        if (output) output.textContent = `${Math.round(percent)}%`;
+        try { localStorage.setItem('11408-preview-scale', String(scale)); } catch (error) {}
+      };
     })();
   </script>
 </head>
@@ -158,7 +176,7 @@
               <label class="focus-preview-zoom" for="focusZoomRange" title="调节专注预览的正文字号">
                 <span class="focus-preview-zoom-label">字号</span>
                 <span class="focus-preview-zoom-small" aria-hidden="true">A</span>
-                <input id="focusZoomRange" type="range" min="75" max="180" step="5" value="100" aria-label="专注预览字号" />
+                <input id="focusZoomRange" type="range" min="75" max="180" step="5" value="100" aria-label="专注预览字号" oninput="window.__setFocusPreviewScaleFallback(this.value)" onchange="window.__setFocusPreviewScaleFallback(this.value)" />
                 <span class="focus-preview-zoom-large" aria-hidden="true">A</span>
                 <output id="focusZoomValue" for="focusZoomRange">100%</output>
               </label>
