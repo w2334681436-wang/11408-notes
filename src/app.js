@@ -1,6 +1,7 @@
 const DB_NAME = 'kaoyan11408_notes_db_v2';
     const STORE_NAME = 'kv';
     const DATA_KEY = 'notes-data';
+    const PREVIEW_SCALE_KEY = '11408-preview-scale';
     const SECTION_PACKAGE_APP = '11408-notes-section-package';
     const SECTION_PACKAGE_VERSION = 1;
     const MAX_SECTION_PACKAGE_BYTES = 100 * 1024 * 1024;
@@ -270,6 +271,19 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       return Math.min(1.8, Math.max(0.75, Math.round(scale * 20) / 20));
     }
 
+    function getStoredPreviewScale() {
+      try {
+        const value = Number(localStorage.getItem(PREVIEW_SCALE_KEY));
+        return Number.isFinite(value) && value > 0 ? value : null;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function storePreviewScale(scale) {
+      try { localStorage.setItem(PREVIEW_SCALE_KEY, String(scale)); } catch (error) {}
+    }
+
     function applyPreviewScale() {
       const scale = normalizePreviewScale(state.previewScale);
       state.previewScale = scale;
@@ -283,6 +297,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       const percent = Math.round(scale * 100);
       if (els.focusZoomRange) els.focusZoomRange.value = String(percent);
       if (els.focusZoomValue) els.focusZoomValue.textContent = `${percent}%`;
+      storePreviewScale(scale);
     }
 
     function setPreviewScale(value) {
@@ -1529,7 +1544,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     }
 
     function normalizeImportedData() {
-      state.previewScale = normalizePreviewScale(state.previewScale);
+      state.previewScale = normalizePreviewScale(getStoredPreviewScale() ?? state.previewScale);
       for (const subject of state.subjects || []) {
         walk(subject.nodes || [], node => {
           if (typeof node.html !== 'string') node.html = '';
@@ -1632,6 +1647,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#prevBtn').onclick = () => goPrevNext(-1); $('#nextBtn').onclick = () => goPrevNext(1);
       $('#focusPrevBtn').onclick = () => goPrevNext(-1); $('#focusNextBtn').onclick = () => goPrevNext(1);
       els.focusZoomRange?.addEventListener('input', e => setPreviewScale(e.target.value));
+      els.focusZoomRange?.addEventListener('change', e => setPreviewScale(e.target.value));
       $('#focusHtmlBtn').onclick = openHtmlCenter;
       $('#focusEditBtn2').onclick = switchToEditModeFromFocus;
       $('#focusExitBtn').onclick = exitPreviewFocus;

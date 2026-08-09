@@ -1,8 +1,10 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260809-focus-zoom-v6';
+  const version = window.__APP_VERSION__ || '20260809-focus-zoom-v7';
   const statusEl = document.getElementById('offlineStatus');
   const installBtn = document.getElementById('installAppBtn');
   let deferredInstallPrompt = null;
+  const hadServiceWorkerController = !!navigator.serviceWorker?.controller;
+  let reloadingForUpdate = false;
 
   function notify(message) {
     const toast = document.getElementById('toast');
@@ -81,6 +83,12 @@
     setOfflineStatus('浏览器不支持离线安装', 'error');
     return;
   }
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadServiceWorkerController || reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    window.location.reload();
+  });
 
   window.addEventListener('load', async () => {
     setOfflineStatus('正在准备离线资源…', 'loading');

@@ -1,4 +1,4 @@
-const APP_VERSION = '20260809-focus-zoom-v6';
+const APP_VERSION = '20260809-focus-zoom-v7';
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || APP_VERSION;
 const CACHE_PREFIX = '11408-notes-cache-';
 const CACHE_NAME = `${CACHE_PREFIX}${SW_VERSION}`;
@@ -63,7 +63,10 @@ self.addEventListener('activate', (event) => {
 
 async function cacheFirst(request, cacheName = CACHE_NAME) {
   const cache = await caches.open(cacheName);
-  const cached = await cache.match(request, { ignoreSearch: true });
+  const requestUrl = new URL(request.url);
+  // JS/CSS 使用 ?v=版本号。必须精确匹配，否则旧 SW 会把旧脚本交给新版 HTML，造成界面存在但功能无效。
+  const hasVersion = requestUrl.searchParams.has('v');
+  const cached = await cache.match(request, { ignoreSearch: !hasVersion });
   if (cached) return cached;
 
   const response = await fetch(request);

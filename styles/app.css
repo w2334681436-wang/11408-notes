@@ -251,7 +251,7 @@
       margin: 0;
       accent-color: var(--brand);
       cursor: pointer;
-      touch-action: pan-x;
+      touch-action: none;
     }
     .focus-preview-zoom-small { font-size: 11px; }
     .focus-preview-zoom-large { font-size: 16px; }

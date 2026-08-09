@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = process.argv[2] ? path.resolve(process.cwd(), process.argv[2]) : projectRoot;
 const scope = 'https://example.test/11408-notes/';
+const appVersion = '20260809-focus-zoom-v7';
 const listeners = new Map();
 const stores = new Map();
 let online = true;
@@ -128,6 +129,20 @@ assert.equal(cacheNames.length, 1);
 const cache = await caches.open(cacheNames[0]);
 assert.equal(cache.responses.size, 10, 'Every declared app-shell resource must be cached');
 
+// 回归测试：新版 HTML 请求新 ?v= 时，不能因为 ignoreSearch 命中旧脚本。
+await cache.put(`${scope}src/app.js?v=${appVersion}`, new Response('STALE_APP_JS'));
+const freshVersionResponse = await dispatchFetch({
+  method: 'GET',
+  mode: 'same-origin',
+  destination: 'script',
+  url: `${scope}src/app.js?v=future-version`
+});
+assert.match(await freshVersionResponse.text(), /kaoyan11408_notes_db_v2/);
+await cache.put(
+  `${scope}src/app.js?v=${appVersion}`,
+  await mockFetch(`${scope}src/app.js?v=${appVersion}`)
+);
+
 online = false;
 
 const navigationResponse = await dispatchFetch({
@@ -142,7 +157,7 @@ const scriptResponse = await dispatchFetch({
   method: 'GET',
   mode: 'same-origin',
   destination: 'script',
-  url: `${scope}src/app.js?v=offline-test`
+  url: `${scope}src/app.js?v=${appVersion}`
 });
 assert.equal(scriptResponse.status, 200);
 assert.match(await scriptResponse.text(), /kaoyan11408_notes_db_v2/);
@@ -178,12 +193,16 @@ assert.match(appJs, /delete state\.annotationSettings/);
 assert.match(appJs, /function isPreviewFocusActive\(\)/);
 assert.match(appJs, /#focusPreviewBtn'\)\.onclick = togglePreviewFocus/);
 assert.match(appHtml, /id="focusZoomRange"[^>]+type="range"/);
+assert.match(appHtml, /__setFocusPreviewScaleFallback/);
 assert.match(appJs, /function setPreviewScale\(value\)/);
 assert.match(appJs, /function prepareSectionNavigation\(\)/);
 assert.match(appJs, /pendingSectionTopReset/);
 assert.match(appCss, /--preview-body-size/);
 assert.match(appCss, /overflow-anchor:\s*none/);
-assert.match(appHtml, /20260809-focus-zoom-v6/);
-assert.match(pwaJs, /20260809-focus-zoom-v6/);
+assert.match(appHtml, /20260809-focus-zoom-v7/);
+assert.match(pwaJs, /20260809-focus-zoom-v7/);
+assert.match(appJs, /PREVIEW_SCALE_KEY/);
+assert.match(pwaJs, /controllerchange/);
+assert.match(await fs.readFile(path.join(root, 'service-worker.js'), 'utf8'), /ignoreSearch:\s*!hasVersion/);
 
 console.log('Offline verification passed: app shell, navigation, scripts and MathJax work without network.');
