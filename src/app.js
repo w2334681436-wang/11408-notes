@@ -7,11 +7,11 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     const MAX_SECTION_PACKAGE_BYTES = 100 * 1024 * 1024;
     const MATHJAX_ASSET_URL = (() => {
       const url = new URL('./vendor/mathjax/tex-svg.js', document.baseURI);
-      url.searchParams.set('v', window.__APP_VERSION__ || '20260809-render-engine-v9');
+      url.searchParams.set('v', window.__APP_VERSION__ || '20260814-html-render-v10');
       return url.href;
     })();
-    const MARKDOWN_IT_ASSET_URL = new URL(`./vendor/markdown-it/markdown-it.min.js?v=${window.__APP_VERSION__ || '20260809-render-engine-v9'}`, document.baseURI).href;
-    const MARKDOWN_RENDERER_ASSET_URL = new URL(`./src/markdown-renderer.js?v=${window.__APP_VERSION__ || '20260809-render-engine-v9'}`, document.baseURI).href;
+    const MARKDOWN_IT_ASSET_URL = new URL(`./vendor/markdown-it/markdown-it.min.js?v=${window.__APP_VERSION__ || '20260814-html-render-v10'}`, document.baseURI).href;
+    const MARKDOWN_RENDERER_ASSET_URL = new URL(`./src/markdown-renderer.js?v=${window.__APP_VERSION__ || '20260814-html-render-v10'}`, document.baseURI).href;
     const SUBJECTS = [
       { id: 'gaoshu', name: '高数', short: '高' },
       { id: 'xiandai', name: '线代', short: '线' },
@@ -30,6 +30,11 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
     let saveTimer = null;
     let modalResolve = null;
     let htmlCenterObjectUrl = null;
+    let htmlCenterRenderKey = '';
+    let htmlCenterRenderToken = '';
+    let htmlCenterRenderRevision = 0;
+    let htmlCenterLoadTimer = null;
+    let htmlCenterPreviousUrl = null;
     let pageSearchState = { query: '', matches: [], index: -1 };
     let pageTocState = { collapsed: true, headings: [], activeId: '' };
     let scrollSyncState = { lock: false, raf: 0 };
@@ -52,6 +57,7 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       modalMask: $('#modalMask'), modalTitle: $('#modalTitle'), modalInput: $('#modalInput'),
       importMask: $('#importMask'), importText: $('#importText'),
       htmlCenterMask: $('#htmlCenterMask'), htmlCenterPanel: $('#htmlCenterPanel'), htmlCenterFrame: $('#htmlCenterFrame'),
+      htmlCenterStatus: $('#htmlCenterStatus'), htmlCenterStatusText: $('#htmlCenterStatusText'),
       focusZoomRange: $('#focusZoomRange'), focusZoomValue: $('#focusZoomValue'),
       toast: $('#toast')
     };
@@ -641,17 +647,82 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       requestAnimationFrame(() => refreshPageTocActive());
     }
 
-    function setHtmlCenterContent(htmlCode) {
+    function htmlContentKey(html) {
+      let hash = 2166136261;
+      for (let i = 0; i < html.length; i++) {
+        hash ^= html.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      return `${html.length}-${(hash >>> 0).toString(36)}`;
+    }
+
+    function setHtmlCenterStatus(mode, text) {
+      if (!els.htmlCenterStatus) return;
+      els.htmlCenterStatus.classList.toggle('ready', mode === 'ready');
+      els.htmlCenterStatus.classList.toggle('error', mode === 'error');
+      if (els.htmlCenterStatusText && text) els.htmlCenterStatusText.textContent = text;
+      const retry = $('#htmlCenterRetryBtn');
+      if (retry) retry.hidden = mode !== 'error';
+    }
+
+    function releasePreviousHtmlUrl() {
+      if (!htmlCenterPreviousUrl) return;
+      URL.revokeObjectURL(htmlCenterPreviousUrl);
+      htmlCenterPreviousUrl = null;
+    }
+
+    function setHtmlCenterContent(htmlCode, { force = false } = {}) {
       const body = (htmlCode || '').trim();
       if (!body || !els.htmlCenterFrame) return;
-      if (htmlCenterObjectUrl) {
-        URL.revokeObjectURL(htmlCenterObjectUrl);
-        htmlCenterObjectUrl = null;
+      const renderKey = htmlContentKey(body);
+      if (!force && renderKey === htmlCenterRenderKey && htmlCenterObjectUrl) {
+        setHtmlCenterStatus('ready');
+        return;
       }
-      const blob = new Blob([htmlDoc(body)], { type: 'text/html;charset=utf-8' });
-      htmlCenterObjectUrl = URL.createObjectURL(blob);
-      // 用 Blob URL 替代 srcdoc，修复部分手机/PWA 中 iframe 反复打开后白屏的问题。
-      els.htmlCenterFrame.src = htmlCenterObjectUrl;
+
+      const revision = ++htmlCenterRenderRevision;
+      const token = `html-${Date.now().toString(36)}-${revision}`;
+      htmlCenterRenderToken = token;
+      htmlCenterRenderKey = renderKey;
+      window.clearTimeout(htmlCenterLoadTimer);
+      setHtmlCenterStatus('loading', '正在打开 HTML…');
+
+      try {
+        const blob = new Blob([htmlDoc(body, token)], { type: 'text/html;charset=utf-8' });
+        const nextUrl = URL.createObjectURL(blob);
+        releasePreviousHtmlUrl();
+        htmlCenterPreviousUrl = htmlCenterObjectUrl;
+        htmlCenterObjectUrl = nextUrl;
+
+        els.htmlCenterFrame.onload = () => {
+          if (revision !== htmlCenterRenderRevision || els.htmlCenterFrame.src !== nextUrl) return;
+          setHtmlCenterStatus('ready');
+          releasePreviousHtmlUrl();
+        };
+        els.htmlCenterFrame.onerror = () => {
+          if (revision !== htmlCenterRenderRevision) return;
+          setHtmlCenterStatus('error', 'HTML 打开失败，请重新渲染');
+        };
+        // 保留旧 Blob 直到新文档加载完成，避免 Safari 在切换 URL 时回收过早而白屏。
+        els.htmlCenterFrame.src = nextUrl;
+
+        htmlCenterLoadTimer = window.setTimeout(() => {
+          if (revision !== htmlCenterRenderRevision) return;
+          try {
+            const doc = els.htmlCenterFrame.contentDocument;
+            if (!doc?.body || (!doc.body.childNodes.length && !doc.body.textContent?.trim())) {
+              setHtmlCenterStatus('error', 'HTML 没有成功显示，请重新渲染');
+              return;
+            }
+          } catch (error) {
+            // 沙箱文档不可检查时也不能让状态层一直遮挡正文。
+          }
+          setHtmlCenterStatus('ready');
+        }, 2500);
+      } catch (error) {
+        htmlCenterRenderKey = '';
+        setHtmlCenterStatus('error', `HTML 解析失败：${error?.message || '未知错误'}`);
+      }
     }
 
     function openHtmlCenter() {
@@ -671,10 +742,74 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       updateHtmlGlobalButton();
     }
 
-    function htmlDoc(html) {
-      const cfg = `<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\\\(','\\\\)']],displayMath:[['$$','$$'],['\\\\[','\\\\]']],processEscapes:true},svg:{fontCache:'global'}};<\/script><script src="${escapeAttr(MATHJAX_ASSET_URL)}"><\/script>`;
-      const body = (html || '').trim() ? html : '';
-      return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${cfg}<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Arial,sans-serif;padding:16px;line-height:1.7;color:#172033}img{max-width:100%;border-radius:12px}pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:12px;overflow:auto}table{border-collapse:collapse;width:100%}td,th{border:1px solid #e5e7eb;padding:8px}</style></head><body>${body}</body></html>`;
+    function hasHtmlMath(doc) {
+      const copy = doc.body?.cloneNode(true);
+      if (!copy) return false;
+      copy.querySelectorAll('script,style,pre,code,textarea').forEach(node => node.remove());
+      const text = copy.textContent || '';
+      return /\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\\begin\{[a-zA-Z*]+\}|(^|[^\\$])\$[^$\n]+\$/m.test(text);
+    }
+
+    function serializeElementAttributes(element) {
+      return Array.from(element?.attributes || [])
+        .map(attr => ` ${attr.name}="${escapeAttr(attr.value)}"`)
+        .join('');
+    }
+
+    function htmlDoc(html, token = '') {
+      const parsed = new DOMParser().parseFromString(String(html || ''), 'text/html');
+      // 用户代码里的 CSP 会阻止 Blob 文档加载本地离线资源；预览由 iframe 沙箱负责隔离。
+      parsed.querySelectorAll('meta[http-equiv]').forEach(meta => {
+        if ((meta.getAttribute('http-equiv') || '').toLowerCase() === 'content-security-policy') meta.remove();
+      });
+
+      // 外部样式改为非阻塞加载：网络慢或断网时先显示可读正文，样式可用后再套用。
+      parsed.querySelectorAll('link[rel~="stylesheet"]').forEach(link => {
+        if (link.hasAttribute('media')) return;
+        link.setAttribute('media', 'print');
+        link.setAttribute('onload', "this.media='all'");
+      });
+
+      // 将脚本移到正文之后并延迟外部脚本，防止任意一个远程脚本把整个窗口卡成白屏。
+      const userScripts = [];
+      parsed.querySelectorAll('script').forEach(script => {
+        const source = script.getAttribute('src') || '';
+        const isMathJax = /mathjax|tex-(?:svg|chtml)/i.test(source) || (!source && /window\.MathJax\s*=/.test(script.textContent || ''));
+        script.remove();
+        if (isMathJax) return;
+        if (source && !script.hasAttribute('async')) script.setAttribute('defer', '');
+        userScripts.push(script.outerHTML);
+      });
+
+      const needsMath = hasHtmlMath(parsed);
+      const safeToken = JSON.stringify(token).replace(/</g, '\\u003c');
+      const mathUrl = JSON.stringify(MATHJAX_ASSET_URL).replace(/</g, '\\u003c');
+      const base = parsed.head.querySelector('base') ? '' : `<base href="${escapeAttr(document.baseURI)}">`;
+      const documentStyle = `<style>
+        :root{color-scheme:light}html{min-height:100%;background:#fff}body{box-sizing:border-box;min-height:100%;margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Arial,sans-serif;line-height:1.7;color:#172033;overflow-wrap:anywhere}*,*::before,*::after{box-sizing:inherit}img,video,canvas,svg{max-width:100%;height:auto}iframe{max-width:100%}pre{max-width:100%;padding:12px;border-radius:12px;background:#0f172a;color:#e2e8f0;overflow:auto;white-space:pre}code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}table{display:block;max-width:100%;border-collapse:collapse;overflow-x:auto}td,th{border:1px solid #e5e7eb;padding:8px}mjx-container{max-width:100%;overflow-x:auto;overflow-y:hidden}
+      </style>`;
+      const readyScript = `<script>(function(){try{parent.postMessage({source:'11408-html-renderer',token:${safeToken},status:'content-ready'},'*')}catch(e){}})();<\/script>`;
+      const mathScript = needsMath ? `<script>(function(){
+        var send=function(status){try{parent.postMessage({source:'11408-html-renderer',token:${safeToken},status:status},'*')}catch(e){}};
+        window.MathJax={tex:{inlineMath:[['$','$'],['\\\\(','\\\\)']],displayMath:[['$$','$$'],['\\\\[','\\\\]']],processEscapes:true},svg:{fontCache:'global'},startup:{typeset:true}};
+        var script=document.createElement('script');script.src=${mathUrl};script.async=true;
+        script.onload=function(){var ready=window.MathJax&&window.MathJax.startup&&window.MathJax.startup.promise;Promise.resolve(ready).then(function(){send('math-ready')}).catch(function(){send('math-error')})};
+        script.onerror=function(){send('math-error')};document.head.appendChild(script);
+      })();<\/script>` : '';
+
+      return `<!doctype html><html${serializeElementAttributes(parsed.documentElement)}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${base}${documentStyle}${parsed.head.innerHTML}</head><body${serializeElementAttributes(parsed.body)}>${readyScript}${parsed.body.innerHTML}${mathScript}${userScripts.join('')}</body></html>`;
+    }
+
+    function handleHtmlRendererMessage(event) {
+      const data = event.data;
+      if (event.source !== els.htmlCenterFrame?.contentWindow || data?.source !== '11408-html-renderer' || data.token !== htmlCenterRenderToken) return;
+      if (data.status === 'content-ready' || data.status === 'math-ready') {
+        setHtmlCenterStatus('ready');
+      } else if (data.status === 'math-error') {
+        // 公式失败不能遮住已经完成的 HTML 正文，只给出一次非阻塞提示。
+        setHtmlCenterStatus('ready');
+        showToast('HTML 已显示，公式引擎暂时不可用');
+      }
     }
 
     function waitForMathJaxReady(timeoutMs = 3000) {
@@ -1770,6 +1905,11 @@ const DB_NAME = 'kaoyan11408_notes_db_v2';
       $('#htmlGlobalBtn').onclick = openHtmlCenter;
       $('#htmlCenterCloseBtn').onclick = closeHtmlCenter;
       $('#htmlCenterFullBtn').onclick = () => toggleFullscreen(els.htmlCenterPanel);
+      $('#htmlCenterRetryBtn').onclick = () => {
+        const htmlCode = findNodeById(state.activeNodeId)?.node?.html || '';
+        if (htmlCode.trim()) setHtmlCenterContent(htmlCode, { force: true });
+      };
+      window.addEventListener('message', handleHtmlRendererMessage);
       els.htmlCenterMask.addEventListener('click', e => { if (e.target === els.htmlCenterMask) closeHtmlCenter(); });
       $('#addRootBtn').onclick = addRoot; $('#addChildBtn').onclick = () => addChild(); $('#addSiblingBtn').onclick = addSibling; $('#moveUpBtn').onclick = () => moveActiveNode(-1); $('#moveDownBtn').onclick = () => moveActiveNode(1); $('#deleteNodeBtn').onclick = deleteNode;
       $('#prevBtn').onclick = () => goPrevNext(-1); $('#nextBtn').onclick = () => goPrevNext(1);

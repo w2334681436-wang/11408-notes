@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = process.argv[2] ? path.resolve(process.cwd(), process.argv[2]) : projectRoot;
 const scope = 'https://example.test/11408-notes/';
-const appVersion = '20260809-render-engine-v9';
+const appVersion = '20260814-html-render-v10';
 const listeners = new Map();
 const stores = new Map();
 let online = true;
@@ -208,8 +208,8 @@ assert.match(appJs, /function prepareSectionNavigation\(\)/);
 assert.match(appJs, /pendingSectionTopReset/);
 assert.match(appCss, /--preview-body-size/);
 assert.match(appCss, /overflow-anchor:\s*none/);
-assert.match(appHtml, /20260809-render-engine-v9/);
-assert.match(pwaJs, /20260809-render-engine-v9/);
+assert.match(appHtml, /20260814-html-render-v10/);
+assert.match(pwaJs, /20260814-html-render-v10/);
 assert.match(appJs, /PREVIEW_SCALE_KEY/);
 assert.match(pwaJs, /controllerchange/);
 assert.match(await fs.readFile(path.join(root, 'service-worker.js'), 'utf8'), /ignoreSearch:\s*!hasVersion/);
@@ -218,5 +218,16 @@ assert.match(appJs, /function ensureMathJaxReady\(\)/);
 assert.match(appJs, /data-mathjax-retry/);
 assert.match(appJs, /mathTypesetQueue/);
 assert.match(appJs, /previewRenderRevision/);
+assert.match(appHtml, /id="htmlCenterStatus"/);
+assert.match(appHtml, /id="htmlCenterRetryBtn"/);
+assert.match(appJs, /function hasHtmlMath\(doc\)/);
+assert.match(appJs, /function handleHtmlRendererMessage\(event\)/);
+assert.match(appJs, /script\.async=true/);
+assert.match(appJs, /htmlCenterPreviousUrl = htmlCenterObjectUrl/);
+assert.doesNotMatch(
+  appJs,
+  /const cfg = `<script>window\.MathJax[\s\S]+?<script src=/,
+  'HTML preview must not synchronously load MathJax before its body'
+);
 
 console.log('Offline verification passed: app shell, navigation, scripts and MathJax work without network.');

@@ -1,5 +1,5 @@
 (function () {
-  const version = window.__APP_VERSION__ || '20260809-render-engine-v9';
+  const version = window.__APP_VERSION__ || '20260814-html-render-v10';
   const statusEl = document.getElementById('offlineStatus');
   const installBtn = document.getElementById('installAppBtn');
   let deferredInstallPrompt = null;
