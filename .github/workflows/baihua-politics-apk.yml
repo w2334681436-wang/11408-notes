@@ -24,7 +24,12 @@ jobs:
         with:
           gradle-version: '8.7'
       - name: Install Android platform
-        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+        shell: bash
+        run: |
+          SDK="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -type f -name sdkmanager | sort -Vr | head -n 1)"
+          if [ -z "$SDK" ]; then echo 'Android sdkmanager missing' >&2; exit 1; fi
+          yes | "$SDK" --licenses > /dev/null || true
+          "$SDK" --install 'platforms;android-35' 'build-tools;35.0.0'
       - name: Expand Android source archive
         shell: bash
         run: |
