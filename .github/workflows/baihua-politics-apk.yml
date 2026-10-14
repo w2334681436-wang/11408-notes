@@ -36,6 +36,7 @@ jobs:
           mkdir -p baihua-android-build/source
           base64 --decode baihua-android-build/payload.b64 | tar -xJ -C baihua-android-build/source
           echo '.topic-card-title,.topic-card-desc{display:block;max-width:100%}' >> baihua-android-build/source/app/src/main/assets/app.css
+          sed -i '/import android.view.ViewGroup;/a import android.view.View;' baihua-android-build/source/app/src/main/java/com/baihuazhengzhi/notes/MainActivity.java
       - name: Build installable debug APK
         working-directory: baihua-android-build/source
         run: gradle --no-daemon :app:assembleDebug
