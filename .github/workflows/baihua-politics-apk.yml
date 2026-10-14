@@ -1,0 +1,45 @@
+name: Build Baihua Politics APK
+on:
+  push:
+    branches:
+      - build/baihua-politics-android-apk
+    paths:
+      - 'baihua-android-build/**'
+      - '.github/workflows/baihua-politics-apk.yml'
+  workflow_dispatch:
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android platform
+        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Expand Android source archive
+        shell: bash
+        run: |
+          mkdir -p baihua-android-build/source
+          base64 --decode baihua-android-build/payload.b64 | tar -xJ -C baihua-android-build/source
+          echo '.topic-card-title,.topic-card-desc{display:block;max-width:100%}' >> baihua-android-build/source/app/src/main/assets/app.css
+      - name: Build installable debug APK
+        working-directory: baihua-android-build/source
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Publish APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BaihuaPolitics-Android-APK
+          path: baihua-android-build/source/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
